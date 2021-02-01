@@ -112,15 +112,16 @@ StackTIMonadStack S Mon = record
 -- br l = k0 k1 k2 k3 ... kn v. kl k_{l+1} ... k{n} v
 
 BlockCont : {I : Set} (K : I → Set) → List I → Set → Set
-BlockCont K [] R = R
-BlockCont K (i ∷ is) R = (K i → BlockCont K is R) → BlockCont K is R
+BlockCont S [] R = R
+BlockCont S (i ∷ is) R = (S i → BlockCont S is R) → BlockCont S is R
 
--- block : {I : Set} → {K : I → Set} → ∀{i is R} → K i → (BlockCont K is R) → BlockCont K (i ∷ is) R
--- block f = λ i 
+branch0 : {I : Set} → {S : I → Set} → ∀{R i is}
+          → S i → BlockCont S (i ∷ is) R
+branch0 v k = k v
 
-branch0 : {I : Set} → {K : I → Set} → ∀{R i is}
-        → K i → BlockCont K (i ∷ is) R
-branch0 {I} {K} {R} {i} {is} v k = k v
+block : {I : Set} → {S : I → Set} → ∀{R i is}
+        → BlockCont S (i ∷ is) R → (S i → BlockCont S is R) → BlockCont S is R
+block a = a
 
 module Example where
 
