@@ -9,12 +9,14 @@ open import Function
 open import Level
 open import Data.Unit
 open import Data.Product
+open import Data.Sum
 open import Data.Maybe hiding(_>>=_)
-open import Data.Nat renaming (suc to nsuc)
+open import Data.Nat
+open import Data.Empty
 open import Category.Monad.State using (IStateT ; StateTIMonad)
 open import Category.Monad.Continuation using (DContT ; DContIMonad)
 
-open L using (List ; [] ; _∷_ )
+open L using (List ; [] ; _∷_)
 
 module IList where
   data IList {I : Set} (S : I → Set) : List I → Set where
@@ -32,17 +34,29 @@ module IList where
   drop : ∀ {I : Set} {S : I → Set} → ∀ (is) → ∀ {js} → IList S (is L.++ js) → IList S js
   drop is ws = proj₂ (split is ws)
 
+  dropn : ∀ {I : Set} {S : I → Set} → ∀ (n : ℕ) → ∀ {is} → IList S is → IList S (L.drop n is)
+  dropn zero ws = ws
+  dropn (suc n) (w ∷ ws) = dropn n ws
+  dropn (suc n) [] = []
+
   _++_ : ∀ {I : Set} {S : I → Set} → ∀ {is js} → IList S is → IList S js → IList S (is L.++ js)
   [] ++ ws = ws
   (v ∷ vs) ++ ws = v ∷ (vs ++ ws)
 
-  [_] = 
+  [_] : ∀ {I : Set} {S : I → Set} → ∀ {i} → S i → IList S L.[ i ]
+  [_] v = v ∷ []
+
+  lookup : ∀ {I : Set} {S : I → Set} → ∀ {is} → IList S is → (n : Fin (L.length is)) → S (L.lookup is n)
+  lookup (v ∷ vs) zero = v
+  lookup (v ∷ vs) (suc i) = lookup vs i
 
 module I = IList
 open I using (IList ; [] ; _∷_)
 
+
 StackT : {I : Set} → (I → Set) → (Set → Set) → (List I → List I → Set → Set)
-StackT {I} S = IStateT (IList S)
+StackT S = IStateT (IList S)
+
 
 record RawIMonadStack {I : Set} (S : I → Set)
                       (M : List I → List I → Set → Set) : Set₁ where
@@ -59,49 +73,60 @@ record RawIMonadStack {I : Set} (S : I → Set)
   push : ∀ {i is} → S i → M is (i ∷ is) ⊤
   push = λ v → up (push1 v)
 
+  pop-list : ∀ is → ∀ {is'} → M (is L.++ is') is' (IList S is) 
+  pop-list [] = return []
+  pop-list (i ∷ is) = do v ← pop
+                         vs ← pop-list is
+                         return (v ∷ vs)
+
+  push-list : ∀ {is is'} → IList S is →  M is' (is L.++ is') ⊤
+  push-list [] = return tt
+  push-list (v ∷ vs) = do push-list vs
+                          push v
 
   drop : ∀ {is} → (n : Fin (L.length is)) → M is (L.drop (toℕ n) is) ⊤
   drop {i ∷ is} zero = return tt
   drop {i ∷ is} (suc n) = do pop
                              drop {is} n
 
-  pop-nth : ∀ {is} → (n : Fin (L.length is)) → M is (L.drop (nsuc (toℕ n)) is) (S (L.lookup is n))
+  pop-nth : ∀ {is} → (n : Fin (L.length is)) → M is (L.drop (ℕ.suc (toℕ n)) is) (S (L.lookup is n))
   pop-nth {i ∷ is} zero = pop
-  pop-nth {i ∷ is} (suc n) = do drop
+  pop-nth {i ∷ is} (suc n) = do pop
                                 pop-nth {is} n
 
 StackTIMonadStack : {I : Set} (S : I → Set) {M : Set → Set}
                     → RawMonad M → RawIMonadStack S (StackT S M)
 StackTIMonadStack S Mon = record
   { monad = StateTIMonad (IList S) Mon
-  ; pop1 = λ where (s ∷ []) → return (s , [])
-  ; push1 = λ s [] → return (_ , s ∷ [])
+  ; pop1 = λ where (s ∷ []) → return (s , []) -- pop1 >> push1 x  ~ set1 x  / pop1 = get1 delete
+  ; push1 = λ s [] → return (_ , s ∷ [])      -- pop1 >>= push1   ~ get1    / push1 = set1 ignore
   ; up = λ {_} {is} {_} f ss →
            do let vs , us = I.split is ss
               x , ws ← f vs
               return (x , ws I.++ us)
   } where open RawIMonad Mon
 
-BlkCtxT : {I : Set} → (I → Set) → (Set → Set) → (List I → List I → Set → Set)
-BlkCtxT K = DContT (IList S)
 
-record RawIMonadBlkCtx {I : Set} (K : I → Set)
-                       (M : I → I → Set → Set) : Set₁ where
-  field
-    monad : RawIMonad M
-    leave1 : ∀ {i j} → M (i ∷ []) (j ∷ []) (K (j ∷ [])) → M [] [] (K i) -- C[∘]   [block {... } ...] , E[ε] → E'[sdf ]
-    enter1 : ∀ {a i j k} →
-            ((a → M (j ∷ []) (j ∷ []) (K (i ∷ []))) → M (j ∷ []) (k ∷ []) (K (k ∷ []))) → M (j ∷ []) (i ∷ []) a
+-- const c = λ k0 ... kn v0 . k0 ... kn c v1
+-- add = λ k0 ... kn (v0, v1) . k0 ... kn (v0 + v1)
+-- br l = k0 k1 k2 k3 ... kn v. kl k_{l+1} ... k{n} v
 
-[ [ [ ]r2 ]r1 r1]
+BlockCont : {I : Set} (K : I → Set) → List I → Set → Set
+BlockCont K [] R = R
+BlockCont K (i ∷ is) R = (K i → BlockCont K is R) → BlockCont K is R
 
-(((r2 -> r1) -> r1)) -> ((r4 -> r4) -> r3) -> r2 -> r3
-block r2 r1   ...   (block r4 r3) ...  ->  
+-- block : {I : Set} → {K : I → Set} → ∀{i is R} → K i → (BlockCont K is R) → BlockCont K (i ∷ is) R
+-- block f = λ i 
+
+branch0 : {I : Set} → {K : I → Set} → ∀{R i is}
+        → K i → BlockCont K (i ∷ is) R
+branch0 {I} {K} {R} {i} {is} v k = k v
 
 module Example where
 
 open import Data.Bool using (Bool ; _∧_) renaming (not to bool-not)
 open import Data.Nat
+open import Function.Identity.Categorical as Id using (Identity)
 
 data valtype : Set where
   bool : valtype
@@ -113,76 +138,10 @@ val bool = Bool
 val nat = ℕ
 val unit = ⊤
 
-opds = IList val
-
+resulttype : Set
 resulttype = List valtype 
 
-open import Function.Identity.Categorical as Id using (Identity)
+result : resulttype → Set
+result = IList val
+
 OpdStack = StackT val Identity
-
-record blkctxtype : Set where
-  field
-    opt-inputtype : Maybe resulttype
-    outputtype : resulttype
-    frametype : resulttype
-    ctx-outputtype : resulttype
-
-  ctx-inputtype : resulttype
-  ctx-inputtype = outputtype L.++ frametype
-
-  labeltype : resulttype
-  labeltype with opt-inputtype
-  ...          | just inputtype = inputtype
-  ...          | nothing = outputtype
-
-record blkctx (bt : blkctxtype) : Set where
-  open blkctxtype bt
-  field
-    ctx-label : OpdStack labeltype outputtype ⊤
-    ctx-end : OpdStack ctx-inputtype ctx-outputtype ⊤
-
-ctrlstacktype = List blkctxtype
-
-
-module OpdM = RawIMonadStack (StackTIMonadStack val Id.monad)
-CtrlStack = StackT blkctx Identity
-
-module CtrlM = RawIMonadStack (StackTIMonadStack blkctx Id.monad)
-
-and : OpdStack (bool ∷ bool ∷ []) L.[ bool ] ⊤
-and = do b₁ ← pop
-         b₂ ← pop
-         push (b₁ ∧ b₂)
-         where open OpdM
-
-not : OpdStack L.[ bool ] L.[ bool ] ⊤
-not = do b ← pop
-         push (bool-not b)
-         where open OpdM
-
-br : ∀ {cs} → (n : Fin (L.length cs)) → CtrlStack cs (L.drop (nsuc (toℕ n)) cs) (OpdStack (blkctxtype.labeltype (L.lookup cs n)) (blkctxtype.outputtype (L.lookup cs n)) ⊤)
-br n = do ctx ← pop-nth n
-          return (blkctx.ctx-label ctx)
-       where open CtrlM
-
-end : ∀ {c cs} → CtrlStack (c ∷ cs) cs (OpdStack (blkctxtype.ctx-inputtype c) (blkctxtype.ctx-outputtype c) ⊤)
-end = do ctx ← pop
-         return (blkctx.ctx-end ctx)
-       where open CtrlM
-
-to-loop-ctxtype : resulttype → resulttype → blkctxtype
-blkctxtype.opt-inputtype (to-loop-ctxtype intyp _) = just intyp
-blkctxtype.outputtype (to-loop-ctxtype _ outtyp) = outtyp
-blkctxtype.frametype (to-loop-ctxtype _ _) = []
-blkctxtype.ctx-outputtype (to-loop-ctxtype _ _) = []
-
-to-blk-ctxtype : resulttype → resulttype → blkctxtype
-blkctxtype.opt-inputtype (to-blk-ctxtype intyp _) = nothing
-blkctxtype.outputtype (to-blk-ctxtype _ outtyp) = outtyp
-blkctxtype.frametype (to-blk-ctxtype _ _) = []
-blkctxtype.ctx-outputtype (to-blk-ctxtype _ _) = []
-
-
--- block : ∀ {cs} → (intyp outtyp : resulttype) → CtrlStack ((to-blk-ctxtype intyp outtyp) ∷ cs) ((to-blk-ctxtype intyp outtyp) ∷ cs) ⊤ → CtrlStack cs ((to-blk-ctxtype intyp outtyp) ∷ cs) ⊤
--- block intyp outyp m = _
-
