@@ -7,6 +7,7 @@ import Data.List as List
 import Function
 import Level
 import Data.Fin as Fin
+
 import Data.Unit as Unit
 import Data.Product as Product
 import Data.Sum as Sum
@@ -153,6 +154,7 @@ module Wasm where
       resulttype : Set
       resulttype = List valtype
 
+      infix 4 _⇒_
       data functype : Set where
         _⇒_ : resulttype → resulttype → functype
 
@@ -183,21 +185,22 @@ module Wasm where
       insns : Set
       insns = List insn
 
-      infix 4 _%_
-      data oresulttype : Set where
-        _%_  : resulttype → List (resulttype × resulttype) → oresulttype
-
-      infixr 3 _⇒_
-      data ofunctype : Set where
-        _⇒_ : resulttype → oresulttype → ofunctype
+      data frametype : Set where
+        loopt : resulttype → resulttype → frametype
+        blockt : resulttype → frametype
 
       -- we take resulttype as value stack instead of taking sequence of const instruction (so innermost block context does not include value and insts)
       data frame : Set where
         loopf : vals → resulttype → insn → resulttype → insns → frame
         blockf : vals → resulttype → insns → frame
 
+      ctxtype = List frametype
       frames = List frame
       state = frames × vals × insns
+
+      infix 4 _⇒_/_ 
+      data efunctype : Set where
+        _⇒_/_ : resulttype → resulttype → ctxtype → efunctype
 
     module _ where
       open String
@@ -470,13 +473,13 @@ module Wasm where
 
     ex0 ex1 ex2 ex3 ex4 : state
     ex0 = ([] , (cnat 1 ∷ cnat 2 ∷ []) , (add ∷ []))
-    ex1 = ([] , (cbool true ∷ cnat 1 ∷ cnat 0 ∷ []) , ( not ∷ (if-else (nat ∷ nat ∷ [] ⇒ nat ∷ []) [ add ] [ drop ]) ∷ []))
+    ex1 = ([] , (cbool true ∷ cnat 1 ∷ cnat 0 ∷ []) , ( not ∷ (if-else (nat ∷ nat ∷ [] ⇒ [ nat ]) [ add ] [ drop ]) ∷ []))
     ex2 = ([] , [] , (block ([] ⇒ [ nat ]) (const (cnat 1) ∷ block ([ nat ] ⇒ [ nat ]) (br 1 ∷ []) ∷ []) ∷ []))
     ex3 = ([] , [] , (drop ∷ []))
     ex4 = ([] , [] , (loop ([] ⇒ nat ∷ nat ∷ []) ([ br 0 ])) ∷ [])
 
     run-wasm : state → String
-    run-wasm ex = show-state ex ++ " --> " ++ show-result (estepn 10 ex)
+    run-wasm ex = show-state ex ++ " ↪* " ++ show-result (estepn 10 ex)
 
   module Typing where
     open String using (String)
@@ -487,43 +490,50 @@ module Wasm where
     open Product
     open List using (_∷_ ; [] ; [_] ; _++_)
 
-    data tval : val → valtype → Set where
-      tbool : ∀{b} → tval (cbool b) bool
-      tnat : ∀{n} → tval (cnat n) nat
-      tunit : tval (cunit Unit.tt) unit
+    infix 3 _∈-v_
+    infix 3 _∈-vs_
+    infix 3 _∈-i_
+    infix 3 _∈-is_
 
-    data tvals : vals → resulttype → Set where
-      tbottom : tvals [] []
-      tstack : ∀{v t vs ts} → tval v t → tvals vs ts → tvals (v ∷ vs) (t ∷ ts)
+    data _∈-v_ : val → valtype → Set where
+      tbool : ∀{b} → cbool b ∈-v bool
+      tnat : ∀{n} → cnat n ∈-v nat
+      tunit : cunit Unit.tt ∈-v unit
+
+    data _∈-vs_ : vals → resulttype → Set where
+      tbottom : [] ∈-vs []
+      tstack : ∀{v t vs ts} → v ∈-v t → vs ∈-vs ts → v ∷ vs ∈-vs t ∷ ts
 
     mutual
-      data tinsn : insn → ofunctype → Set where
-        tconst : ∀{v t} → tval v t → tinsn (const v) ([] ⇒ [ t ] % [])
-        tnop : tinsn nop ([] ⇒ [] % [])
-        tnot : tinsn not ([ bool ] ⇒ [ bool ] % [])
-        tand : tinsn and ((bool ∷ bool ∷ []) ⇒ [ bool ] % [])
-        tadd : tinsn add ((nat ∷ nat ∷ []) ⇒ [ nat ] % [])
-        tsub : tinsn sub ((nat ∷ nat ∷ []) ⇒ [ nat ] % [])
-        teqz : tinsn eqz ([ nat ] ⇒ [ bool ] % [])
-        tdup  : ∀{t} → tinsn dup ([ t ] ⇒ (t ∷ t ∷ []) % [])
-        tdrop : ∀{t} → tinsn drop ([ t ] ⇒ [] % [])
-        tblock : ∀{is a b} → tinsns is (a ⇒ b % [(b , b)])
-                → tinsn (block (a ⇒ b) is) (a ⇒ b % [])
-        tif-else : ∀{ist isf a b} → tinsns ist (a ⇒ b % [(b , b)]) → tinsns isf (a ⇒ b % [(b , b)])
-                  → tinsn (if-else (a ⇒ b) ist isf) (a ⇒ b % [])
-        tloop : ∀{is a b} → tinsns is (a ⇒ b % [(a , b)])
-               → tinsn (loop (a ⇒ b) is) (a ⇒ b % [])
-        tbr0 : ∀{a b c} → tinsn (br Nat.zero) (a ⇒ b % [(a , c)])
-        tbrn : ∀{a x xs b c n} → tinsn (br n) (a ⇒ c % xs) → tinsn (br (Nat.suc n)) (a ⇒ b % (x ∷ xs))
+      data _∈-i_ : insn → efunctype → Set where
+        tconst : ∀{v t} → v ∈-v t → const v ∈-i [] ⇒ [ t ] / []
+        tnop : nop ∈-i [] ⇒ [] / []
+        tnot : not ∈-i [ bool ] ⇒ [ bool ] / []
+        tand : and ∈-i (bool ∷ bool ∷ []) ⇒ [ bool ] / []
+        tadd : add ∈-i (nat ∷ nat ∷ []) ⇒ [ nat ] / []
+        tsub : sub ∈-i (nat ∷ nat ∷ []) ⇒ [ nat ] / []
+        teqz : eqz ∈-i [ nat ] ⇒ [ bool ] / []
+        tdup : ∀{t} → dup ∈-i [ t ] ⇒ t ∷ t ∷ [] / []
+        tdrop : ∀{t} → drop ∈-i [ t ] ⇒ [] / []
+        tblock : ∀{is a b}
+          → is ∈-is a ⇒ b / [ blockt b ]
+          → block (a ⇒ b) is ∈-i a ⇒ b / []
+        tif-else : ∀{ist isf a b}
+          → ist ∈-is a ⇒ b / [ blockt b ]
+          → isf ∈-is a ⇒ b / [ blockt b ]
+          → if-else (a ⇒ b) ist isf ∈-i bool ∷ a ⇒ b / []
+        tloop : ∀{is a b}
+          → is ∈-is a ⇒ b / [ loopt a b ]
+          → loop (a ⇒ b) is ∈-i a ⇒ b / []
+        tbr0-block : ∀{a b} → br Nat.zero ∈-i a ⇒ b / [ blockt a ]
+        tbr0-loop : ∀{a b c} → br Nat.zero ∈-i a ⇒ c / [ loopt a b ]
+        tbrn : ∀{a x xs b c n} → br n ∈-i a ⇒ c / xs → br (Nat.suc n) ∈-i a ⇒ b / x ∷ xs
 
-        tup : ∀ {is a b d ls ls'} → tinsn is (a ⇒ b % ls ++ ls') → tinsn is (a ++ d ⇒ b ++ d % ls ++ ls') -- I'm not sure this is correct
+      data _∈-is_ : insns → efunctype → Set where
+        tempty : [] ∈-is [] ⇒ [] / []
+        tseq : ∀ {i is a b c ls} → i ∈-i a ⇒ b / ls → is ∈-is b ⇒ c / ls → i ∷ is ∈-is a ⇒ c / ls
+        tup : ∀ {is a b d ls ls'} → is ∈-is a ⇒ b / ls ++ ls' → is ∈-is a ++ d ⇒ b ++ d / ls ++ ls'
 
-      data tinsns : insns → ofunctype → Set where
-        tempty : tinsns [] ([] ⇒ [] % [])
-        tseq : ∀ {i is a b c ls} → tinsn i (a ⇒ b % ls) → tinsns is (b ⇒ c % ls) → tinsns (i ∷ is) (a ⇒ c % ls)
+    data _∈-is_closed : insns → functype → Set where
+      closed : ∀{is a b} → is ∈-is a ⇒ b / [] → is ∈-is (a ⇒ b) closed
 
-    data closed-tinsns : insns → functype → Set where
-      closed : ∀{is a b} → tinsns is (a ⇒ b % []) → closed-tinsns is (a ⇒ b)
-
-    
- 
