@@ -542,15 +542,15 @@ module Wasm where
 
     infix 2 _∈-s_
     data _∈-s_ : state → resulttype → Set where
-      tstate : ∀{vs fs is a b ks} → is ∈-is a ⇒ b / ks → vs ∈-vs a → fs ∈-fs ks → (fs , vs , is) ∈-s b
+      tstate : ∀{vs fs is a b ks} → fs ∈-fs ks → vs ∈-vs a → is ∈-is a ⇒ b / ks → (fs , vs , is) ∈-s b
 
     open Interpreter
     open import Relation.Binary.PropositionalEquality
     safety : (t : resulttype) → (st : state) → st ∈-s t → ∃ λ st' → (eval1 st ≡ ok st') × (st' ∈-s t)
     safety _ ([] , vs , []) t =
       ([] , vs , []) , (refl , t)
-    safety _ ([] , [] , const v ∷ is) (tstate (tseq (tconst t) pis) _ _) =
-      ([] , v ∷ [] , is) , (refl , tstate pis (tvstack t tvempty) tfempty)
-    safety _ (([] , a , l , is) ∷ [] , vs , []) (tstate tiempty pvs _) =
-      ([] , vs , is) , (tstate (++-identityʳ vs) ? tfempty)
+    safety _ ([] , [] , const v ∷ is) (tstate _ _ (tseq (tconst t) tis)) =
+      ([] , v ∷ [] , is) , (refl , tstate tfempty (tvstack t tvempty) tis)
+    safety _ (([] , a , l , is) ∷ [] , vs , []) (tstate tf pvs _) =
+      ([] , vs , is) , (tstate tfempty (++-identityʳ vs) ? {- typeof is -})
       where open import Data.List.Properties
