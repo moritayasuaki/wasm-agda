@@ -551,5 +551,6 @@ module Wasm where
       ([] , vs , []) , (refl , t)
     safety _ ([] , [] , const v ∷ is) (tstate (tseq (tconst t) pis) _ _) =
       ([] , v ∷ [] , is) , (refl , tstate pis (tvstack t tvempty) tfempty)
-    safety _ (([] , a , l , is) ∷ [] , v , []) (tstate tiempty pvs _) =
-      ([] , v , is) , (refl , tstate ? pvs tfempty)
+    safety _ (([] , a , l , is) ∷ [] , vs , []) (tstate tiempty pvs _) =
+      ([] , vs , is) , (tstate (++-identityʳ vs) ? tfempty)
+      where open import Data.List.Properties
