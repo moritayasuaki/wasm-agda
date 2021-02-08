@@ -154,9 +154,12 @@ module Wasm where
       resulttype : Set
       resulttype = List valtype
 
-      infix 4 _⇒_
-      data functype : Set where
-        _⇒_ : resulttype → resulttype → functype
+      infixr 4.5 _⇒_
+      record functype : Set where
+        constructor _⇒_
+        field
+          input : resulttype
+          output : resulttype
 
       data val : Set where
         cbool : Bool → val
@@ -185,22 +188,17 @@ module Wasm where
       insns : Set
       insns = List insn
 
-      data frametype : Set where
-        loopt : resulttype → resulttype → frametype
-        blockt : resulttype → frametype
-
       -- we take resulttype as value stack instead of taking sequence of const instruction (so innermost block context does not include value and insts)
-      data frame : Set where
-        loopf : vals → resulttype → insn → resulttype → insns → frame
-        blockf : vals → resulttype → insns → frame
+      frame : Set
+      frame = vals × resulttype × insn × insns
 
-      ctxtype = List frametype
+      ctxtype = List resulttype
       frames = List frame
       state = frames × vals × insns
 
-      infix 4 _⇒_/_ 
+      infix 4 _/_ 
       data efunctype : Set where
-        _⇒_/_ : resulttype → resulttype → ctxtype → efunctype
+        _/_ : functype → ctxtype → efunctype
 
     module _ where
       open String
@@ -237,9 +235,11 @@ module Wasm where
 
       mutual
         show-insns : insns → String
-        show-insns [] = ""
-        show-insns (i ∷ []) = show-insn i
-        show-insns (i ∷ is) = show-insn i ++ " " ++ show-insns is
+        show-insns is = "[" ++ go is ++ "]" where
+          go : insns → String
+          go [] = ""
+          go (i ∷ []) = show-insn i
+          go (i ∷ is) = show-insn i ++ " " ++ show-insns is
  
         show-insn : insn → String
         show-insn (const n) = concat-with-space ("const" ∷ show-val n ∷ [])
@@ -251,25 +251,20 @@ module Wasm where
         show-insn eqz = "eqz"
         show-insn dup = "dup"
         show-insn drop = "drop"
-        show-insn (block ft is) = concat-with-space ("block" ∷ show-functype ft ∷ show-insns is ∷ "end" ∷ [])
-        show-insn (if-else ft ist isf) = concat-with-space ("if" ∷ show-functype ft ∷ "then" ∷ show-insns ist ∷ "else" ∷ show-insns isf ∷ "end" ∷ [])
-        show-insn (loop ft is) = concat-with-space ("loop" ∷ show-functype ft ∷ show-insns is ∷ "end" ∷ [])
+        show-insn (block ft is) = concat-with-space ("block" ∷ show-functype ft ∷ show-insns is ∷ [])
+        show-insn (if-else ft ist isf) = concat-with-space ("if" ∷ show-functype ft ∷ show-insns ist ∷ show-insns isf ∷ [])
+        show-insn (loop ft is) = concat-with-space ("loop" ∷ show-functype ft ∷ show-insns is ∷ [])
         show-insn (br n) = concat-with-space ("br" ∷ NS.show n ∷ [])
         show-insn (br-if n) = concat-with-space ("br-if" ∷ NS.show n ∷ [])
 
       show-frame : frame → String
-      show-frame (loopf vs a l b is) = show-vals vs ++ "ℓ" ++ show-functype (a ⇒ b) ++ "{" ++ show-insn l ++ "}" ++ "*" ++ show-insns is
-      show-frame (blockf vs b is) = show-vals vs ++ "ℓ" ++ show-functype (b ⇒ b) ++ "{}" ++ "*" ++ show-insns is
+      show-frame (vs , a , l , is) = show-vals vs ++ "ℓ" ++ show-resulttype a ++ "{" ++ show-insn l ++ "}" ++ "*" ++ show-insns is
 
       show-frames : frames → String
       show-frames fs = "[" ++ show-list-with-sep show-frame " " fs ++ "]"
 
       show-state : state → String
       show-state (fs , vs , is) = "(" ++ show-frames fs ++ ", " ++ show-vals vs ++ ", " ++ show-insns is ++ ")"
-
-
-   
-    
 
   module Interpreter where
     open Function 
@@ -327,8 +322,8 @@ module Wasm where
     encvals IList.[] = []
     encvals (v IList.∷ vs) = encval v ∷ encvals vs
 
-    _orelse_ : ∀ {X} → E X → E X → E X
-    (ma orelse mb) st = ma st |> λ where
+    _<|>_ : ∀ {X} → E X → E X → E X
+    (ma <|> mb) st = ma st |> λ where
       (ok st') → ok st'
       (err _ _) → mb st 
 
@@ -368,28 +363,19 @@ module Wasm where
     emit i (fs , vs , is) = ok (tt , fs , vs , i ∷ is)
 
     enter : frame → E ⊤
-    enter (blockf vs' b is') (fs , vs , is) = ok (tt , (blockf vs b is) ∷ fs , vs' , is')
-    enter (loopf vs' a l b is') (fs , vs , is) = ok (tt , (loopf vs a l b is) ∷ fs , vs' , is')
+    enter (vs' , a , l , is') (fs , vs , is) = ok (tt , (vs , a , l , is) ∷ fs , vs' , is')
 
     leave : E frame
-    leave (((blockf vs b is) ∷ fs) , vs' , is') = ok ((blockf vs' b is') , fs , vs , is)
-    leave (((loopf  vs a l b is) ∷ fs) , vs' , is') = ok ((loopf vs' a l b is') , fs , vs , is)
+    leave ((vs , a , l , is) ∷ fs , vs' , is') = ok ((vs' , a , l , is') , fs , vs , is)
     leave st = err "control stack underflow" st
 
     br-helper : ℕ → E ⊤
     br-helper zero = do
-      leave >>= λ where
-        (blockf vs a _) → do
-          vs' , _ ← chkvals a vs
-          pushvs (encvals vs')
-        (loopf vs a l _ _) → do
-          vs' , _ ← chkvals a vs
-          emit l
-          pushvs (encvals vs')
+      vs , a , l , is ← leave
+      vs' , _ ← chkvals a vs
+      pushvs (encvals vs')
     br-helper (suc n) = do
-      vs ← leave >>= λ where
-        (blockf vs _ _) → return vs
-        (loopf vs _ _ _ _) → return vs
+      vs , _ , _ , _ ← leave
       pushvs vs
       br-helper n
 
@@ -424,15 +410,15 @@ module Wasm where
       return tt
     einsn (block (a ⇒ b) is) = do
       vs ← popchks a
-      enter (blockf (encvals vs) b is)
+      enter (encvals vs , b , nop , is)
     einsn (if-else (a ⇒ b) ist isf) = do
       p ← popchk bool
       vs ← popchks a
-      if p then enter (blockf (encvals vs) b ist)
-           else enter (blockf (encvals vs) b isf)
+      if p then enter (encvals vs , b , nop , ist)
+           else enter (encvals vs , b , nop , isf)
     einsn (loop (a ⇒ b) is) = do
       vs ← popchks a
-      enter (loopf (encvals vs) a (loop (a ⇒ b) is) b is)
+      enter (encvals vs , a , loop (a ⇒ b) is , is)
 
     einsn (br n) = br-helper n
 
@@ -441,27 +427,23 @@ module Wasm where
         true → br-helper n
 
     eend : E ⊤
-    eend = leave >>= λ where
-        (blockf vs _ _) → do
-          pushvs vs
-        (loopf vs _ _ _ _) → do
-          pushvs vs
+    eend = do
+      vs , _ , _ , _ ← leave
+      pushvs vs
 
     estep : E ⊤
-    estep = (fetch >>= einsn) orelse eend
+    estep = (fetch >>= einsn) <|> eend
 
-    terminated : E vals
-    terminated ([] , vs , []) = ok (vs , [] , [] , [])
-    terminated st = err "state is in evaluation" st
+    data eval-result : Set where
+      stop : vals → eval-result
+      cont : state → eval-result
+      fail : String → state → eval-result
 
-    estepn : ℕ → E vals
-    estepn zero st = err "time out" st
-    estepn (suc n) = terminated orelse (estep >> estepn n)
-
-    show-result : error (vals × state) → String
-    show-result (ok (vs , [] , [] , [])) = show-list-with-sep (λ x → x) ":" $ "success" ∷ show-vals vs ∷ []
-    show-result (ok (_ , st)) = show-list-with-sep (λ x → x) ":" $ "cont" ∷ show-state st ∷ []
-    show-result (err emesg st) = show-list-with-sep (λ x → x) ":" $ "error" ∷ emesg ∷  show-state st ∷ []
+    eval1 : state → error state
+    eval1 ([] , vs , []) = ok ([] , vs , [])
+    eval1 st with estep st
+    ...         | ok (_ , st') = ok st'
+    ...         | err emsg st' = err emsg st'
 
   module Example where
     open Product
@@ -470,6 +452,7 @@ module Wasm where
     open Interpreter
     open Bool hiding (not)
     open String
+    open Nat
 
     ex0 ex1 ex2 ex3 ex4 : state
     ex0 = ([] , (cnat 1 ∷ cnat 2 ∷ []) , (add ∷ []))
@@ -478,8 +461,19 @@ module Wasm where
     ex3 = ([] , [] , (drop ∷ []))
     ex4 = ([] , [] , (loop ([] ⇒ nat ∷ nat ∷ []) ([ br 0 ])) ∷ [])
 
-    run-wasm : state → String
-    run-wasm ex = show-state ex ++ " ↪* " ++ show-result (estepn 10 ex)
+    evaln : state → ℕ → error vals
+    evaln ([] , vs , []) _ = ok vs
+    evaln st zero = err "time out" st
+    evaln st (suc n) with eval1 st
+    ...                 | ok st' = evaln st' n
+    ...                 | (err emsg st') = err emsg st'
+
+    show-result : error vals → String
+    show-result (ok vs) = show-vals vs
+    show-result (err emesg st) = show-list-with-sep (λ x → x) ": " (show-state st ∷ emesg ∷ [])
+
+    show-eval : state → String
+    show-eval ex = show-state ex ++ " ↪* " ++ show-result (evaln ex 1024)
 
   module Typing where
     open String using (String)
@@ -488,12 +482,14 @@ module Wasm where
     open IExc
     open Sum
     open Product
-    open List using (_∷_ ; [] ; [_] ; _++_)
+    open Fin
+    open List using (_∷_ ; [] ; [_] ; _++_ ; length ; lookup)
+    open functype
 
-    infix 3 _∈-v_
-    infix 3 _∈-vs_
-    infix 3 _∈-i_
-    infix 3 _∈-is_
+    infix 2 _∈-v_
+    infix 2 _∈-vs_
+    infix 2 _∈-i_
+    infix 2 _∈-is_
 
     data _∈-v_ : val → valtype → Set where
       tbool : ∀{b} → cbool b ∈-v bool
@@ -516,24 +512,36 @@ module Wasm where
         tdup : ∀{t} → dup ∈-i [ t ] ⇒ t ∷ t ∷ [] / []
         tdrop : ∀{t} → drop ∈-i [ t ] ⇒ [] / []
         tblock : ∀{is a b}
-          → is ∈-is a ⇒ b / [ blockt b ]
+          → is ∈-is a ⇒ b / [ b ]
           → block (a ⇒ b) is ∈-i a ⇒ b / []
         tif-else : ∀{ist isf a b}
-          → ist ∈-is a ⇒ b / [ blockt b ]
-          → isf ∈-is a ⇒ b / [ blockt b ]
+          → ist ∈-is a ⇒ b / [ b ]
+          → isf ∈-is a ⇒ b / [ b ]
           → if-else (a ⇒ b) ist isf ∈-i bool ∷ a ⇒ b / []
         tloop : ∀{is a b}
-          → is ∈-is a ⇒ b / [ loopt a b ]
+          → is ∈-is a ⇒ b / [ a ]
           → loop (a ⇒ b) is ∈-i a ⇒ b / []
-        tbr0-block : ∀{a b} → br Nat.zero ∈-i a ⇒ b / [ blockt a ]
-        tbr0-loop : ∀{a b c} → br Nat.zero ∈-i a ⇒ c / [ loopt a b ]
-        tbrn : ∀{a x xs b c n} → br n ∈-i a ⇒ c / xs → br (Nat.suc n) ∈-i a ⇒ b / x ∷ xs
+        tbrn : ∀{ks b} → {n : Fin (length ks)} → br (toℕ n) ∈-i (lookup ks n) ⇒ b / ks
 
       data _∈-is_ : insns → efunctype → Set where
         tempty : [] ∈-is [] ⇒ [] / []
-        tseq : ∀ {i is a b c ls} → i ∈-i a ⇒ b / ls → is ∈-is b ⇒ c / ls → i ∷ is ∈-is a ⇒ c / ls
-        tup : ∀ {is a b d ls ls'} → is ∈-is a ⇒ b / ls ++ ls' → is ∈-is a ++ d ⇒ b ++ d / ls ++ ls'
+        tseq : ∀ {i is a b c ks} → i ∈-i a ⇒ b / ks → is ∈-is b ⇒ c / ks → i ∷ is ∈-is a ⇒ c / ks
+        tup : ∀ {is a b d ks ks'} → is ∈-is a ⇒ b / ks → is ∈-is a ++ d ⇒ b ++ d / ks ++ ks'
 
-    data _∈-is_closed : insns → functype → Set where
-      closed : ∀{is a b} → is ∈-is a ⇒ b / [] → is ∈-is (a ⇒ b) closed
+    infix 2 _∈-f_
+    data _∈-f_ : frame → resulttype → Set where
+      tframe : ∀ {vs k l cont} → (vs , k , l , cont) ∈-f k 
 
+    infix 2 _∈-fs_
+    data _∈-fs_ : frames → ctxtype → Set where
+      tfempty : [] ∈-fs []
+      tfstack : ∀ {f fs k ks} → f ∈-f k → fs ∈-fs ks → f ∷ fs ∈-fs k ∷ ks
+
+    infix 2 _∈-s_
+    data _∈-s_ : state → resulttype → Set where
+      tstate : ∀{vs fs is a b ks} → is ∈-is a ⇒ b / ks → vs ∈-vs a → fs ∈-fs ks → (fs , vs , is) ∈-s b
+
+    open Interpreter
+    open import Relation.Binary.PropositionalEquality
+    testep : (t : resulttype) → (st : state) → st ∈-s t → ∃ λ st' → (eval1 st ≡ ok st') × (st' ∈-s t)
+    testep t ([] , [] , []) (tstate tempty tbottom tfempty) = ([] , [] , []) , (refl , _)
