@@ -300,6 +300,9 @@ module Wasm where
     pop (fs , v ∷ vs , is) = ok (v , fs , vs , is)
     pop st = err "value stack underflow" st
 
+    append : vals → E ⊤
+    append vs (fs , vs' , is) = ok (tt , fs , (vs ++ vs') ,  is)
+
     typeof-val : val → valtype
     typeof-val (cbool _) = bool
     typeof-val (cnat _) = nat
@@ -429,7 +432,7 @@ module Wasm where
     eend : E ⊤
     eend = do
       vs , _ , _ , _ ← leave
-      pushvs vs
+      append vs
 
     estep : E ⊤
     estep = (fetch >>= einsn) <|> eend
@@ -544,6 +547,9 @@ module Wasm where
     open Interpreter
     open import Relation.Binary.PropositionalEquality
     safety : (t : resulttype) → (st : state) → st ∈-s t → ∃ λ st' → (eval1 st ≡ ok st') × (st' ∈-s t)
-    safety _ ([] , vs , []) t = ([] , vs , []) , (refl , t)
+    safety _ ([] , vs , []) t =
+      ([] , vs , []) , (refl , t)
     safety _ ([] , [] , const v ∷ is) (tstate (tseq (tconst t) pis) _ _) =
       ([] , v ∷ [] , is) , (refl , tstate pis (tvstack t tvempty) tfempty)
+    safety _ (([] , a , l , is) ∷ [] , v , []) (tstate tiempty pvs _) =
+      ([] , v , is) , (refl , tstate ? pvs tfempty)
