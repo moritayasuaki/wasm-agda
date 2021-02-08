@@ -497,8 +497,8 @@ module Wasm where
       tunit : cunit Unit.tt ∈-v unit
 
     data _∈-vs_ : vals → resulttype → Set where
-      tbottom : [] ∈-vs []
-      tstack : ∀{v t vs ts} → v ∈-v t → vs ∈-vs ts → v ∷ vs ∈-vs t ∷ ts
+      tvempty : [] ∈-vs []
+      tvstack : ∀{v t vs ts} → v ∈-v t → vs ∈-vs ts → v ∷ vs ∈-vs t ∷ ts
 
     mutual
       data _∈-i_ : insn → efunctype → Set where
@@ -524,7 +524,7 @@ module Wasm where
         tbrn : ∀{ks b} → {n : Fin (length ks)} → br (toℕ n) ∈-i (lookup ks n) ⇒ b / ks
 
       data _∈-is_ : insns → efunctype → Set where
-        tempty : [] ∈-is [] ⇒ [] / []
+        tiempty : [] ∈-is [] ⇒ [] / []
         tseq : ∀ {i is a b c ks} → i ∈-i a ⇒ b / ks → is ∈-is b ⇒ c / ks → i ∷ is ∈-is a ⇒ c / ks
         tup : ∀ {is a b d ks ks'} → is ∈-is a ⇒ b / ks → is ∈-is a ++ d ⇒ b ++ d / ks ++ ks'
 
@@ -543,5 +543,7 @@ module Wasm where
 
     open Interpreter
     open import Relation.Binary.PropositionalEquality
-    testep : (t : resulttype) → (st : state) → st ∈-s t → ∃ λ st' → (eval1 st ≡ ok st') × (st' ∈-s t)
-    testep t ([] , [] , []) (tstate tempty tbottom tfempty) = ([] , [] , []) , (refl , _)
+    safety : (t : resulttype) → (st : state) → st ∈-s t → ∃ λ st' → (eval1 st ≡ ok st') × (st' ∈-s t)
+    safety _ ([] , vs , []) t = ([] , vs , []) , (refl , t)
+    safety _ ([] , [] , const v ∷ is) (tstate (tseq (tconst t) pis) _ _) =
+      ([] , v ∷ [] , is) , (refl , tstate pis (tvstack t tvempty) tfempty)
