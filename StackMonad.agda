@@ -154,7 +154,7 @@ module Wasm where
       resulttype : Set
       resulttype = List valtype
 
-      infixr 4.5 _⇒_
+      infix 4.5 _⇒_
       record functype : Set where
         constructor _⇒_
         field
@@ -192,13 +192,11 @@ module Wasm where
       frame : Set
       frame = vals × resulttype × insn × insns
 
-      ctxtype = List resulttype
       frames = List frame
+
+
       state = frames × vals × insns
 
-      infix 4 _/_ 
-      data efunctype : Set where
-        _/_ : functype → ctxtype → efunctype
 
     module _ where
       open String
@@ -301,7 +299,7 @@ module Wasm where
     pop st = err "value stack underflow" st
 
     append : vals → E ⊤
-    append vs (fs , vs' , is) = ok (tt , fs , (vs ++ vs') ,  is)
+    append vs' (fs , vs , is) = ok (tt , fs , vs' ++ vs , is)
 
     typeof-val : val → valtype
     typeof-val (cbool _) = bool
@@ -325,6 +323,7 @@ module Wasm where
     encvals IList.[] = []
     encvals (v IList.∷ vs) = encval v ∷ encvals vs
 
+    infixl 4 _<|>_
     _<|>_ : ∀ {X} → E X → E X → E X
     (ma <|> mb) st = ma st |> λ where
       (ok st') → ok st'
@@ -372,14 +371,14 @@ module Wasm where
     leave ((vs , a , l , is) ∷ fs , vs' , is') = ok ((vs' , a , l , is') , fs , vs , is)
     leave st = err "control stack underflow" st
 
+
     br-helper : ℕ → E ⊤
     br-helper zero = do
-      vs , a , l , is ← leave
-      vs' , _ ← chkvals a vs
-      pushvs (encvals vs')
+      vs , a , _ , _ ← leave
+      append (take (length a) vs)
     br-helper (suc n) = do
       vs , _ , _ , _ ← leave
-      pushvs vs
+      append vs
       br-helper n
 
     einsn : insn → E ⊤
@@ -435,15 +434,11 @@ module Wasm where
       append vs
 
     estep : E ⊤
-    estep = (fetch >>= einsn) <|> eend
-
-    data eval-result : Set where
-      stop : vals → eval-result
-      cont : state → eval-result
-      fail : String → state → eval-result
+    estep ([] , vs , []) = ok (tt , [] , vs , [])
+    estep (fs , vs , []) = eend (fs , vs , [])
+    estep (fs , vs , is) = (fetch >>= einsn) (fs , vs , is)
 
     eval1 : state → error state
-    eval1 ([] , vs , []) = ok ([] , vs , [])
     eval1 st with estep st
     ...         | ok (_ , st') = ok st'
     ...         | err emsg st' = err emsg st'
@@ -478,6 +473,9 @@ module Wasm where
     show-eval : state → String
     show-eval ex = show-state ex ++ " ↪* " ++ show-result (evaln ex 1024)
 
+
+  module TInterpreter where
+
   module Typing where
     open String using (String)
     open Syntax 
@@ -486,14 +484,72 @@ module Wasm where
     open Sum
     open Product
     open Fin
-    open List using (_∷_ ; [] ; [_] ; _++_ ; length ; lookup)
+    open List using (_∷_ ; [] ; [_] ; _++_ ; length ; lookup ; List)
     open functype
+
+
+    labelstype = List resulttype
+
+    infix 4.4 _/_ 
+    record lfunctype : Set where
+      constructor _/_
+      field
+        func : functype
+        labels : labelstype
+
+    record lframetype : Set where
+      constructor lfrm 
+      field
+        remaining : resulttype
+        lcont : lfunctype
+        cont : lfunctype
+
+    ctxtype = List lframetype
+
+    record frametype : Set where
+      constructor frm
+      field
+        remaining : resulttype
+        label : resulttype
+        output : resulttype
+
+    data gfunctype : Set where
+      scope : functype → gfunctype
+      block : frametype → gfunctype → gfunctype
+
+
+    answertype : gfunctype → resulttype
+    answertype (scope (a ⇒ b)) = b
+    answertype (block (frm r l o) gf) = o
+
+    innermost : gfunctype → functype
+    innermost (scope f) = f
+    innermost (block _ gf) = innermost gf
+
+    sorroundings : gfunctype → List frametype
+    sorroundings gf = List.reverse (go gf)
+      where go : gfunctype → List frametype
+            go (scope f) = []
+            go (block f gf) = f ∷ go gf
+
+    labels : List frametype → labelstype
+    labels fs = List.map (frametype.label) fs
+
+    innermost-ltype : gfunctype → lfunctype
+    innermost-ltype gf = innermost gf / labels (sorroundings gf)
+ 
+    gen-ctxtype : gfunctype → ctxtype
+    gen-ctxtype gf = List.reverse (go [] gf)
+      where go : labelstype → gfunctype → ctxtype
+            go _ (scope _) = []
+            go ks (block (frm r k o) gf) = lfrm r (k ⇒ answertype gf / ks) ((answertype gf ++ r) ⇒ o / ks) ∷ go (k ∷ ks) gf
 
     infix 2 _∈-v_
     infix 2 _∈-vs_
     infix 2 _∈-i_
     infix 2 _∈-is_
-
+    infix 2 _∈-li_
+    infix 2 _∈-lis_
     data _∈-v_ : val → valtype → Set where
       tbool : ∀{b} → cbool b ∈-v bool
       tnat : ∀{n} → cnat n ∈-v nat
@@ -503,54 +559,71 @@ module Wasm where
       tvempty : [] ∈-vs []
       tvstack : ∀{v t vs ts} → v ∈-v t → vs ∈-vs ts → v ∷ vs ∈-vs t ∷ ts
 
-    mutual
-      data _∈-i_ : insn → efunctype → Set where
-        tconst : ∀{v t} → v ∈-v t → const v ∈-i [] ⇒ [ t ] / []
-        tnop : nop ∈-i [] ⇒ [] / []
-        tnot : not ∈-i [ bool ] ⇒ [ bool ] / []
-        tand : and ∈-i (bool ∷ bool ∷ []) ⇒ [ bool ] / []
-        tadd : add ∈-i (nat ∷ nat ∷ []) ⇒ [ nat ] / []
-        tsub : sub ∈-i (nat ∷ nat ∷ []) ⇒ [ nat ] / []
-        teqz : eqz ∈-i [ nat ] ⇒ [ bool ] / []
-        tdup : ∀{t} → dup ∈-i [ t ] ⇒ t ∷ t ∷ [] / []
-        tdrop : ∀{t} → drop ∈-i [ t ] ⇒ [] / []
-        tblock : ∀{is a b}
-          → is ∈-is a ⇒ b / [ b ]
-          → block (a ⇒ b) is ∈-i a ⇒ b / []
-        tif-else : ∀{ist isf a b}
-          → ist ∈-is a ⇒ b / [ b ]
-          → isf ∈-is a ⇒ b / [ b ]
-          → if-else (a ⇒ b) ist isf ∈-i bool ∷ a ⇒ b / []
-        tloop : ∀{is a b}
-          → is ∈-is a ⇒ b / [ a ]
-          → loop (a ⇒ b) is ∈-i a ⇒ b / []
-        tbrn : ∀{ks b} → {n : Fin (length ks)} → br (toℕ n) ∈-i (lookup ks n) ⇒ b / ks
+    data _∈-i_ : insn → functype → Set where
+      tconst : ∀{v t} → v ∈-v t → const v ∈-i [] ⇒ [ t ]
+      tnop : nop ∈-i [] ⇒ []
+      tnot : not ∈-i [ bool ] ⇒ [ bool ]
+      tand : and ∈-i (bool ∷ bool ∷ []) ⇒ [ bool ]
+      tadd : add ∈-i (nat ∷ nat ∷ []) ⇒ [ nat ]
+      tsub : sub ∈-i (nat ∷ nat ∷ []) ⇒ [ nat ]
+      teqz : eqz ∈-i [ nat ] ⇒ [ bool ]
+      tdup : ∀{t} → dup ∈-i [ t ] ⇒ t ∷ t ∷ []
+      tdrop : ∀{t} → drop ∈-i [ t ] ⇒ []
 
-      data _∈-is_ : insns → efunctype → Set where
-        tiempty : [] ∈-is [] ⇒ [] / []
-        tseq : ∀ {i is a b c ks} → i ∈-i a ⇒ b / ks → is ∈-is b ⇒ c / ks → i ∷ is ∈-is a ⇒ c / ks
-        tup : ∀ {is a b d ks ks'} → is ∈-is a ⇒ b / ks → is ∈-is a ++ d ⇒ b ++ d / ks ++ ks'
+    data _∈-is_ : insns → functype → Set where
+      tiempty : [] ∈-is [] ⇒ []
+      tiseq : ∀ {i is a b c} → i ∈-i a ⇒ b → is ∈-is b ⇒ c → i ∷ is ∈-is a ⇒ c
+      tiup : ∀ {i is a b c} → i ∈-i a ⇒ b → is ∈-is a ++ c ⇒ b ++ c
+ 
+    mutual
+      data _⊢_∈-li_ : ctx → cxttype → insn → functype → Set where
+        tblock : ∀{is a b ks}
+          → is ∈-lis a ⇒ b / b ∷ ks
+          → block (a ⇒ b) is ∈-li a ⇒ b / ks
+        tif-else : ∀{ist isf a ks b}
+          → ist ∈-lis a ⇒ b / b ∷ ks
+          → isf ∈-lis a ⇒ b / b ∷ ks
+          → if-else (a ⇒ b) ist isf ∈-li bool ∷ a ⇒ b / ks
+        tloop : ∀{is a b ks}
+          → is ∈-lis a ⇒ b / a ∷ ks
+          → loop (a ⇒ b) is ∈-li a ⇒ b / ks
+        tbrn : ∀{ks b} → {n : Fin (length ks)} → br (toℕ n) ∈-li lookup ks n ⇒ b / ks
+
+      data _∈-lis_ : insns → lfunctype → Set where
+        tliempty : [] ∈-lis [] ⇒ [] / []
+        tliseq : ∀ {i is a b c ks} → i ∈-li a ⇒ b / ks → is ∈-lis b ⇒ c / ks → i ∷ is ∈-lis a ⇒ c / ks
+        tliup : ∀ {is a b d ks ks'} → is ∈-lis a ⇒ b / ks → is ∈-lis a ++ d ⇒ b ++ d / ks ++ ks'
+        tlicast : ∀ {is a b} → is ∈-is a ⇒ b → is ∈-lis a ⇒ b / []
 
     infix 2 _∈-f_
-    data _∈-f_ : frame → resulttype → Set where
-      tframe : ∀ {vs k l cont} → (vs , k , l , cont) ∈-f k 
+    data _∈-f_ : frame → lframetype → Set where
+      tframe : ∀ {a vs k ks l cont b r}
+               → vs ∈-vs r
+               → l ∈-li k ⇒ a / ks
+               → cont ∈-lis a ++ r ⇒ b / ks
+               → (vs , k , l , cont) ∈-f (lfrm r (k ⇒ a / ks) (a ++ r ⇒ b / ks))
 
     infix 2 _∈-fs_
-    data _∈-fs_ : frames → ctxtype → Set where
+    data _∈-fs_ : frames → List lframetype → Set where
       tfempty : [] ∈-fs []
-      tfstack : ∀ {f fs k ks} → f ∈-f k → fs ∈-fs ks → f ∷ fs ∈-fs k ∷ ks
+      tfstack : ∀ {f fs c cs} → f ∈-f lfrm f → fs ∈-fs cs → (f ∷ fs) ∈-fs (c ∷ cs)
 
     infix 2 _∈-s_
     data _∈-s_ : state → resulttype → Set where
-      tstate : ∀{vs fs is a b ks} → fs ∈-fs ks → vs ∈-vs a → is ∈-is a ⇒ b / ks → (fs , vs , is) ∈-s b
+      tstate : ∀{vs fs is} → (g : gfunctype) → fs ∈-fs gen-ctxtype g → vs ∈-vs input (innermost g) → is ∈-lis innermost-ltype g → (fs , vs , is) ∈-s (answertype g)
+
+    ∈-vs-append : ∀ {vs vs' ts ts' } → vs ∈-vs ts → vs' ∈-vs ts' → vs ++ vs' ∈-vs ts ++ ts'
+    ∈-vs-append tvempty ps' = ps'
+    ∈-vs-append (tvstack p ps) ps' = tvstack p (∈-vs-append ps ps')
 
     open Interpreter
     open import Relation.Binary.PropositionalEquality
-    safety : (t : resulttype) → (st : state) → st ∈-s t → ∃ λ st' → (eval1 st ≡ ok st') × (st' ∈-s t)
-    safety _ ([] , vs , []) t =
-      ([] , vs , []) , (refl , t)
-    safety _ ([] , [] , const v ∷ is) (tstate _ _ (tseq (tconst t) tis)) =
-      ([] , v ∷ [] , is) , (refl , tstate tfempty (tvstack t tvempty) tis)
-    safety _ (([] , a , l , is) ∷ [] , vs , []) (tstate tf pvs _) =
-      ([] , vs , is) , (tstate tfempty (++-identityʳ vs) ? {- typeof is -})
-      where open import Data.List.Properties
+
+
+{-
+    safety : ∀{t} → (st : state) → st ∈-s t → ∃ λ st' → (eval1 st ≡ ok st') × (st' ∈-s t)
+    safety ([] , vs , []) p = ([] , vs , []) , (refl , p)
+    safety ((vs' , _ , _ , cont) ∷ fs , vs , []) (tstate (block c cs) (tfstack p) pvs pis) =
+      (fs , vs ++ vs' , cont) , (refl , tstate (leavetype c cs))
+
+-}
