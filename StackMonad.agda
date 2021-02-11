@@ -14,6 +14,7 @@ import Data.Sum as Sum
 
 
 
+
 import Data.Nat as Nat
 import Data.Bool as Bool
 import Data.Empty as Empty
@@ -155,11 +156,11 @@ module Wasm where
       resulttype = List valtype
 
       infix 4.5 _⇒_
-      record functype : Set where
+      record functype {X : Set} : Set where
         constructor _⇒_
         field
           input : resulttype
-          output : resulttype
+          output : X
 
       data val : Set where
         cbool : Bool → val
@@ -179,9 +180,9 @@ module Wasm where
         eqz : insn
         dup : insn
         drop : insn
-        block : functype → List insn → insn
-        if-else : functype → List insn → List insn → insn
-        loop : functype → List insn → insn
+        block : functype {resulttype} → List insn → insn
+        if-else : functype {resulttype} → List insn → List insn → insn
+        loop : functype {resulttype} → List insn → insn
         br : ℕ → insn
         br-if : ℕ → insn
 
@@ -190,7 +191,7 @@ module Wasm where
 
       -- we take resulttype as value stack instead of taking sequence of const instruction (so innermost block context does not include value and insts)
       frame : Set
-      frame = vals × resulttype × insn × insns
+      frame = vals × Nat.ℕ × insn × insns
 
       frames = List frame
 
@@ -256,7 +257,7 @@ module Wasm where
         show-insn (br-if n) = concat-with-space ("br-if" ∷ NS.show n ∷ [])
 
       show-frame : frame → String
-      show-frame (vs , a , l , is) = show-vals vs ++ "ℓ" ++ show-resulttype a ++ "{" ++ show-insn l ++ "}" ++ "*" ++ show-insns is
+      show-frame (vs , a , l , is) = show-vals vs ++ "ℓ" ++ NS.show a ++ "{" ++ show-insn l ++ "}" ++ "*" ++ show-insns is
 
       show-frames : frames → String
       show-frames fs = "[" ++ show-list-with-sep show-frame " " fs ++ "]"
@@ -363,7 +364,7 @@ module Wasm where
 
     emit : insn → E ⊤
     emit i (fs , vs , is) = ok (tt , fs , vs , i ∷ is)
-
+    
     enter : frame → E ⊤
     enter (vs' , a , l , is') (fs , vs , is) = ok (tt , (vs , a , l , is) ∷ fs , vs' , is')
 
@@ -371,11 +372,10 @@ module Wasm where
     leave ((vs , a , l , is) ∷ fs , vs' , is') = ok ((vs' , a , l , is') , fs , vs , is)
     leave st = err "control stack underflow" st
 
-
     br-helper : ℕ → E ⊤
     br-helper zero = do
       vs , a , _ , _ ← leave
-      append (take (length a) vs)
+      append (take a vs)
     br-helper (suc n) = do
       vs , _ , _ , _ ← leave
       append vs
@@ -412,15 +412,15 @@ module Wasm where
       return tt
     einsn (block (a ⇒ b) is) = do
       vs ← popchks a
-      enter (encvals vs , b , nop , is)
+      enter (encvals vs , length b , nop , is)
     einsn (if-else (a ⇒ b) ist isf) = do
       p ← popchk bool
       vs ← popchks a
-      if p then enter (encvals vs , b , nop , ist)
-           else enter (encvals vs , b , nop , isf)
+      if p then enter (encvals vs , length b , nop , ist)
+           else enter (encvals vs , length b , nop , isf)
     einsn (loop (a ⇒ b) is) = do
       vs ← popchks a
-      enter (encvals vs , a , loop (a ⇒ b) is , is)
+      enter (encvals vs , length a , loop (a ⇒ b) is , is)
 
     einsn (br n) = br-helper n
 
@@ -458,6 +458,7 @@ module Wasm where
     ex2 = ([] , [] , (block ([] ⇒ [ nat ]) (const (cnat 1) ∷ block ([ nat ] ⇒ [ nat ]) (br 1 ∷ []) ∷ []) ∷ []))
     ex3 = ([] , [] , (drop ∷ []))
     ex4 = ([] , [] , (loop ([] ⇒ nat ∷ nat ∷ []) ([ br 0 ])) ∷ [])
+    ex5 = ([] , [] , const (cnat 1))
 
     evaln : state → ℕ → error vals
     evaln ([] , vs , []) _ = ok vs
@@ -473,6 +474,8 @@ module Wasm where
     show-eval : state → String
     show-eval ex = show-state ex ++ " ↪* " ++ show-result (evaln ex 1024)
 
+    run : List String
+    run = List.map show-eval (ex0 ∷ ex1 ∷ ex2 ∷ ex3 ∷ ex4 ∷ ex5 ∷ [])
 
   module TInterpreter where
 
@@ -490,59 +493,32 @@ module Wasm where
 
     labelstype = List resulttype
 
-    infix 4.4 _/_ 
-    record lfunctype : Set where
+    infix 4.9 _/_ 
+    record lresulttype : Set where
       constructor _/_
       field
-        func : functype
+        main : resulttype
         labels : labelstype
 
-    record lframetype : Set where
-      constructor lfrm 
+    infix 4.5 _↠_
+    record ctxtype {X : Set} : Set where
+      constructor _↠_
       field
-        remaining : resulttype
-        lcont : lfunctype
-        cont : lfunctype
+        delim : X
+        answer : resulttype
 
-    ctxtype = List lframetype
+    record scopetype : Set where
+      constructor sc
+      field
+        vstacktype : resulttype
+        outputtype : resulttype
 
     record frametype : Set where
-      constructor frm
+      constructor fr
       field
-        remaining : resulttype
-        label : resulttype
-        output : resulttype
-
-    data gfunctype : Set where
-      scope : functype → gfunctype
-      block : frametype → gfunctype → gfunctype
-
-
-    answertype : gfunctype → resulttype
-    answertype (scope (a ⇒ b)) = b
-    answertype (block (frm r l o) gf) = o
-
-    innermost : gfunctype → functype
-    innermost (scope f) = f
-    innermost (block _ gf) = innermost gf
-
-    sorroundings : gfunctype → List frametype
-    sorroundings gf = List.reverse (go gf)
-      where go : gfunctype → List frametype
-            go (scope f) = []
-            go (block f gf) = f ∷ go gf
-
-    labels : List frametype → labelstype
-    labels fs = List.map (frametype.label) fs
-
-    innermost-ltype : gfunctype → lfunctype
-    innermost-ltype gf = innermost gf / labels (sorroundings gf)
- 
-    gen-ctxtype : gfunctype → ctxtype
-    gen-ctxtype gf = List.reverse (go [] gf)
-      where go : labelstype → gfunctype → ctxtype
-            go _ (scope _) = []
-            go ks (block (frm r k o) gf) = lfrm r (k ⇒ answertype gf / ks) ((answertype gf ++ r) ⇒ o / ks) ∷ go (k ∷ ks) gf
+        vstacktype : resulttype
+        labeltype : resulttype
+        outputtype : resulttype
 
     infix 2 _∈-v_
     infix 2 _∈-vs_
@@ -550,6 +526,8 @@ module Wasm where
     infix 2 _∈-is_
     infix 2 _∈-li_
     infix 2 _∈-lis_
+    infix 2 _∈-fs_
+    infix 2 _∈-s_
     data _∈-v_ : val → valtype → Set where
       tbool : ∀{b} → cbool b ∈-v bool
       tnat : ∀{n} → cnat n ∈-v nat
@@ -574,9 +552,10 @@ module Wasm where
       tiempty : [] ∈-is [] ⇒ []
       tiseq : ∀ {i is a b c} → i ∈-i a ⇒ b → is ∈-is b ⇒ c → i ∷ is ∈-is a ⇒ c
       tiup : ∀ {i is a b c} → i ∈-i a ⇒ b → is ∈-is a ++ c ⇒ b ++ c
- 
     mutual
-      data _⊢_∈-li_ : ctx → cxttype → insn → functype → Set where
+
+      data _∈-li_ : insn → functype → Set where
+        textend : ∀{i a b ks} → i ∈-i a ⇒ b → i ∈-li a ⇒ b / ks
         tblock : ∀{is a b ks}
           → is ∈-lis a ⇒ b / b ∷ ks
           → block (a ⇒ b) is ∈-li a ⇒ b / ks
@@ -589,28 +568,27 @@ module Wasm where
           → loop (a ⇒ b) is ∈-li a ⇒ b / ks
         tbrn : ∀{ks b} → {n : Fin (length ks)} → br (toℕ n) ∈-li lookup ks n ⇒ b / ks
 
-      data _∈-lis_ : insns → lfunctype → Set where
+      data _∈-lis_ : insns → functype → Set where
         tliempty : [] ∈-lis [] ⇒ [] / []
         tliseq : ∀ {i is a b c ks} → i ∈-li a ⇒ b / ks → is ∈-lis b ⇒ c / ks → i ∷ is ∈-lis a ⇒ c / ks
         tliup : ∀ {is a b d ks ks'} → is ∈-lis a ⇒ b / ks → is ∈-lis a ++ d ⇒ b ++ d / ks ++ ks'
         tlicast : ∀ {is a b} → is ∈-is a ⇒ b → is ∈-lis a ⇒ b / []
 
-    infix 2 _∈-f_
-    data _∈-f_ : frame → lframetype → Set where
-      tframe : ∀ {a vs k ks l cont b r}
-               → vs ∈-vs r
-               → l ∈-li k ⇒ a / ks
-               → cont ∈-lis a ++ r ⇒ b / ks
-               → (vs , k , l , cont) ∈-f (lfrm r (k ⇒ a / ks) (a ++ r ⇒ b / ks))
+    data _∈-fs_ : frames → ctxtype → Set where
+      tfempty : ∀ {a} → [] ∈-fs (a / [] ↠ a)
+      tfstack : ∀ {vs l cont r k a b c fs ks}
+                → vs ∈-vs r
+                → l ∈-li k ⇒ a / ks
+                → cont ∈-lis a ++ r ⇒ b / ks
+                → fs ∈-fs b / ks ↠ c
+                → (vs , length k , l , cont) ∷ fs ∈-fs a / k ∷ ks ↠ c
 
-    infix 2 _∈-fs_
-    data _∈-fs_ : frames → List lframetype → Set where
-      tfempty : [] ∈-fs []
-      tfstack : ∀ {f fs c cs} → f ∈-f lfrm f → fs ∈-fs cs → (f ∷ fs) ∈-fs (c ∷ cs)
-
-    infix 2 _∈-s_
     data _∈-s_ : state → resulttype → Set where
-      tstate : ∀{vs fs is} → (g : gfunctype) → fs ∈-fs gen-ctxtype g → vs ∈-vs input (innermost g) → is ∈-lis innermost-ltype g → (fs , vs , is) ∈-s (answertype g)
+      tstate : ∀ {fs vs is a b c ks}
+               → fs ∈-fs b / ks ↠ c
+               → vs ∈-vs a
+               → is ∈-lis a ⇒ b / ks
+               → (fs , vs , is) ∈-s c
 
     ∈-vs-append : ∀ {vs vs' ts ts' } → vs ∈-vs ts → vs' ∈-vs ts' → vs ++ vs' ∈-vs ts ++ ts'
     ∈-vs-append tvempty ps' = ps'
@@ -620,10 +598,7 @@ module Wasm where
     open import Relation.Binary.PropositionalEquality
 
 
-{-
     safety : ∀{t} → (st : state) → st ∈-s t → ∃ λ st' → (eval1 st ≡ ok st') × (st' ∈-s t)
     safety ([] , vs , []) p = ([] , vs , []) , (refl , p)
-    safety ((vs' , _ , _ , cont) ∷ fs , vs , []) (tstate (block c cs) (tfstack p) pvs pis) =
-      (fs , vs ++ vs' , cont) , (refl , tstate (leavetype c cs))
-
--}
+    safety (fs , vs , const v ∷ is) (tstate pfs pvs (tliseq (textend (tconst pv)) pis)) = (fs , v ∷ vs , is) , (refl , ?)
+    safety ((vs' , _ , _ , cont) ∷ fs , vs , []) (tstate (tfstack pvs' _ pcont pfs) pvs _) = (fs , vs ++ vs' , cont) , (refl , tstate pfs (∈-vs-append pvs pvs') pcont)
