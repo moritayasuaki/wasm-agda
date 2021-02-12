@@ -84,7 +84,7 @@ module Typing where
     data _∈-i_ : insn → functype → Set where
       tconst : ∀{v t} → v ∈-v t → const v ∈-i [] ⇒ [ t ] / []
       tnop : nop ∈-i [] ⇒ [] / []
-      tnot : not ∈-i [ bool ] ⇒ [ bool ] / []
+      tnot : not ∈-i bool ∷ [] ⇒ bool ∷ [] / []
       tand : and ∈-i (bool ∷ bool ∷ []) ⇒ [ bool ] / []
       tadd : add ∈-i (nat ∷ nat ∷ []) ⇒ [ nat ] / []
       tsub : sub ∈-i (nat ∷ nat ∷ []) ⇒ [ nat ] / []
@@ -105,7 +105,7 @@ module Typing where
   
     data _∈-is_ : insns → functype → Set where
       tiempty : ∀ {a ks} → [] ∈-is a ⇒ a / ks
-      tiseq : ∀ {i is a b c d ks} → i ∈-i a ⇒ b / ks → is ∈-is b ++ d ⇒ c / ks → i ∷ is ∈-is a ++ d ⇒ c / ks
+      tiseq : ∀ {i is a b c ks} → i ∈-i a ⇒ b / ks → is ∈-is b ⇒ c / ks → i ∷ is ∈-is a ⇒ c / ks
 
   data _∈-fs_ : frames → ctxtype → Set where
     tfempty : ∀ {a} → [] ∈-fs (a / [] ↠ a)
@@ -137,7 +137,6 @@ module Typing where
   safety ([] , vs , (const v) ∷ is) (tstate pfs pvs (tiseq (tconst pv) pis)) = ([] , (v ∷ vs) , is) , (refl , tstate pfs (tvstack pv pvs) pis)
   safety (f ∷ fs , vs , (const v) ∷ is) (tstate pfs pvs (tiseq (tconst pv) pis)) = (f ∷ fs , (v ∷ vs) , is) , (refl , tstate pfs (tvstack pv pvs) pis)
   safety ([] , vs , nop ∷ is) (tstate pfs pvs (tiseq tnop pis)) = ([] , vs , is) , (refl , tstate pfs pvs pis)
---   safety (fs , (cbool b) ∷ vs , not ∷ is) (tstate pfs (tvstack pv pvs) (tiseq tnot pis)) = (fs , (cbool (Bool.not b)) ∷ vs , is) , (refl , tstate pfs (tvstack tbool pvs) pis)
+  safety (f ∷ fs , vs , nop ∷ is) (tstate pfs pvs (tiseq tnop pis)) = (f ∷ fs , vs , is) , (refl , tstate pfs pvs pis)
+  safety ([] , cbool b ∷ vs , not ∷ is) (tstate pfs (tvstack tbool pvs) (tiseq tnot pis)) = ([] , (cbool (Bool.not b)) ∷ vs , is) , (refl , tstate pfs (tvstack tbool pvs) pis)
   safety ([] , (cbool b) ∷ (cbool b') ∷ vs , and ∷ is) (tstate pfs (tvstack tbool (tvstack tbool pvs)) (tiseq tand pis)) = ([] , (cbool (b Bool.∧ b')) ∷ vs , is) , (refl , tstate pfs (tvstack tbool pvs) pis)
-
---  safety ((vs' , _ , _ , cont) ∷ fs , vs , []) (tstate (tfstack pvs' _ pcont pfs) pvs _) = (fs , vs ++ vs' , cont) , (refl , tstate pfs (∈-vs-append pvs pvs') pcont)
