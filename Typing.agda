@@ -22,13 +22,12 @@ import Data.String as String
 import Category.Monad.State using (IStateT ; StateTIMonad)
 import Category.Monad.Continuation using (DContT ; DContIMonad)
 
-open Wasm.Wasm
+open Wasm
 
 module Typing where
   open String using (String)
   open Syntax 
   open Category.Monad
-  open IExc
   open Sum
   open Product
   open Fin
@@ -82,15 +81,15 @@ module Typing where
 
   mutual
     data _∈-i_ : insn → functype → Set where
-      tconst : ∀{v t} → v ∈-v t → const v ∈-i [] ⇒ [ t ] / []
-      tnop : nop ∈-i [] ⇒ [] / []
-      tnot : not ∈-i bool ∷ [] ⇒ bool ∷ [] / []
-      tand : and ∈-i (bool ∷ bool ∷ []) ⇒ [ bool ] / []
-      tadd : add ∈-i (nat ∷ nat ∷ []) ⇒ [ nat ] / []
-      tsub : sub ∈-i (nat ∷ nat ∷ []) ⇒ [ nat ] / []
-      teqz : eqz ∈-i [ nat ] ⇒ [ bool ] / []
-      tdup : ∀{t} → dup ∈-i [ t ] ⇒ t ∷ t ∷ [] / []
-      tdrop : ∀{t} → drop ∈-i [ t ] ⇒ [] / []
+      tconst : ∀{v t ts ks} → v ∈-v t → const v ∈-i ts ⇒ t ∷ ts / ks
+      tnop : ∀{ts ks} → nop ∈-i ts  ⇒ ts / ks
+      tnot : ∀{ts ks} → not ∈-i bool ∷ ts ⇒ bool ∷ ts / ks
+      tand : ∀{ts ks} → and ∈-i bool ∷ bool ∷ ts ⇒ bool ∷ ts / ks
+      tadd : ∀{ts ks} → add ∈-i nat ∷ nat ∷ ts ⇒ nat ∷ ts / ks
+      tsub : ∀{ts ks} → sub ∈-i nat ∷ nat ∷ ts ⇒ nat ∷ ts / ks
+      teqz : ∀{ts ks} → eqz ∈-i nat ∷ ts ⇒ bool ∷ ts / ks
+      tdup : ∀{t ts ks } → dup ∈-i t ∷ ts ⇒ t ∷ t ∷ ts / ks
+      tdrop : ∀{t ts ks} → drop ∈-i t ∷ ts ⇒ ts / ks
       tblock : ∀{is a b ks}
         → is ∈-is a ⇒ b / b ∷ ks
         → block (a ⇒ b) is ∈-i a ⇒ b / ks
@@ -139,4 +138,10 @@ module Typing where
   safety ([] , vs , nop ∷ is) (tstate pfs pvs (tiseq tnop pis)) = ([] , vs , is) , (refl , tstate pfs pvs pis)
   safety (f ∷ fs , vs , nop ∷ is) (tstate pfs pvs (tiseq tnop pis)) = (f ∷ fs , vs , is) , (refl , tstate pfs pvs pis)
   safety ([] , cbool b ∷ vs , not ∷ is) (tstate pfs (tvstack tbool pvs) (tiseq tnot pis)) = ([] , (cbool (Bool.not b)) ∷ vs , is) , (refl , tstate pfs (tvstack tbool pvs) pis)
+  safety (f ∷ fs , cbool b ∷ vs , not ∷ is) (tstate pfs (tvstack tbool pvs) (tiseq tnot pis)) = (f ∷ fs , (cbool (Bool.not b)) ∷ vs , is) , (refl , tstate pfs (tvstack tbool pvs) pis)
   safety ([] , (cbool b) ∷ (cbool b') ∷ vs , and ∷ is) (tstate pfs (tvstack tbool (tvstack tbool pvs)) (tiseq tand pis)) = ([] , (cbool (b Bool.∧ b')) ∷ vs , is) , (refl , tstate pfs (tvstack tbool pvs) pis)
+  safety (f ∷ fs , (cbool b) ∷ (cbool b') ∷ vs , and ∷ is) (tstate pfs (tvstack tbool (tvstack tbool pvs)) (tiseq tand pis)) = (f ∷ fs , (cbool (b Bool.∧ b')) ∷ vs , is) , (refl , tstate pfs (tvstack tbool pvs) pis)
+  safety ([] , v ∷ vs , drop ∷ is) (tstate pfs (tvstack pv pvs) (tiseq tdrop pis)) = ([] , vs , is) , (refl , tstate pfs pvs pis)
+  safety (f ∷ fs , v ∷ vs , drop ∷ is) (tstate pfs (tvstack pv pvs) (tiseq tdrop pis)) = (f ∷ fs , vs , is) , (refl , tstate pfs pvs pis)
+  safety (fs , vs , br n ∷ is) (tstate pfs pvs (tiseq (tbrn ) pis)) = 
+  (lookup  , vs , is) , (refl , tstate pfs pvs pis)
