@@ -1,4 +1,4 @@
-module StackMonad where
+module Wasm where
 
 import Category.Monad.Indexed
 import Category.Monad
@@ -435,8 +435,9 @@ module Wasm where
 
     estep : E ⊤
     estep ([] , vs , []) = ok (tt , [] , vs , [])
-    estep (fs , vs , []) = eend (fs , vs , [])
-    estep (fs , vs , is) = (fetch >>= einsn) (fs , vs , is)
+    estep (f ∷ fs , vs , []) = eend (f ∷ fs , vs , [])
+    estep (f ∷ fs , vs , i ∷ is) = (fetch >>= einsn) (f ∷ fs , vs , i ∷ is)
+    estep ([] , vs , i ∷ is) = (fetch >>= einsn) ([] , vs , i ∷ is)
 
     eval1 : state → error state
     eval1 st with estep st
@@ -452,13 +453,13 @@ module Wasm where
     open String
     open Nat
 
-    ex0 ex1 ex2 ex3 ex4 : state
+    ex0 ex1 ex2 ex3 ex4 ex5 : state
     ex0 = ([] , (cnat 1 ∷ cnat 2 ∷ []) , (add ∷ []))
     ex1 = ([] , (cbool true ∷ cnat 1 ∷ cnat 0 ∷ []) , ( not ∷ (if-else (nat ∷ nat ∷ [] ⇒ [ nat ]) [ add ] [ drop ]) ∷ []))
     ex2 = ([] , [] , (block ([] ⇒ [ nat ]) (const (cnat 1) ∷ block ([ nat ] ⇒ [ nat ]) (br 1 ∷ []) ∷ []) ∷ []))
     ex3 = ([] , [] , (drop ∷ []))
     ex4 = ([] , [] , (loop ([] ⇒ nat ∷ nat ∷ []) ([ br 0 ])) ∷ [])
-    ex5 = ([] , [] , const (cnat 1))
+    ex5 = ([] , [] , block ([] ⇒ [ nat ]) (const (cnat 1) ∷ []) ∷ [])
 
     evaln : state → ℕ → error vals
     evaln ([] , vs , []) _ = ok vs
@@ -477,128 +478,5 @@ module Wasm where
     run : List String
     run = List.map show-eval (ex0 ∷ ex1 ∷ ex2 ∷ ex3 ∷ ex4 ∷ ex5 ∷ [])
 
-  module TInterpreter where
-
-  module Typing where
-    open String using (String)
-    open Syntax 
-    open Category.Monad
-    open IExc
-    open Sum
-    open Product
-    open Fin
-    open List using (_∷_ ; [] ; [_] ; _++_ ; length ; lookup ; List)
-    open functype
 
 
-    labelstype = List resulttype
-
-    infix 4.9 _/_ 
-    record lresulttype : Set where
-      constructor _/_
-      field
-        main : resulttype
-        labels : labelstype
-
-    infix 4.5 _↠_
-    record ctxtype {X : Set} : Set where
-      constructor _↠_
-      field
-        delim : X
-        answer : resulttype
-
-    record scopetype : Set where
-      constructor sc
-      field
-        vstacktype : resulttype
-        outputtype : resulttype
-
-    record frametype : Set where
-      constructor fr
-      field
-        vstacktype : resulttype
-        labeltype : resulttype
-        outputtype : resulttype
-
-    infix 2 _∈-v_
-    infix 2 _∈-vs_
-    infix 2 _∈-i_
-    infix 2 _∈-is_
-    infix 2 _∈-li_
-    infix 2 _∈-lis_
-    infix 2 _∈-fs_
-    infix 2 _∈-s_
-    data _∈-v_ : val → valtype → Set where
-      tbool : ∀{b} → cbool b ∈-v bool
-      tnat : ∀{n} → cnat n ∈-v nat
-      tunit : cunit Unit.tt ∈-v unit
-
-    data _∈-vs_ : vals → resulttype → Set where
-      tvempty : [] ∈-vs []
-      tvstack : ∀{v t vs ts} → v ∈-v t → vs ∈-vs ts → v ∷ vs ∈-vs t ∷ ts
-
-    data _∈-i_ : insn → functype → Set where
-      tconst : ∀{v t} → v ∈-v t → const v ∈-i [] ⇒ [ t ]
-      tnop : nop ∈-i [] ⇒ []
-      tnot : not ∈-i [ bool ] ⇒ [ bool ]
-      tand : and ∈-i (bool ∷ bool ∷ []) ⇒ [ bool ]
-      tadd : add ∈-i (nat ∷ nat ∷ []) ⇒ [ nat ]
-      tsub : sub ∈-i (nat ∷ nat ∷ []) ⇒ [ nat ]
-      teqz : eqz ∈-i [ nat ] ⇒ [ bool ]
-      tdup : ∀{t} → dup ∈-i [ t ] ⇒ t ∷ t ∷ []
-      tdrop : ∀{t} → drop ∈-i [ t ] ⇒ []
-
-    data _∈-is_ : insns → functype → Set where
-      tiempty : [] ∈-is [] ⇒ []
-      tiseq : ∀ {i is a b c} → i ∈-i a ⇒ b → is ∈-is b ⇒ c → i ∷ is ∈-is a ⇒ c
-      tiup : ∀ {i is a b c} → i ∈-i a ⇒ b → is ∈-is a ++ c ⇒ b ++ c
-    mutual
-
-      data _∈-li_ : insn → functype → Set where
-        textend : ∀{i a b ks} → i ∈-i a ⇒ b → i ∈-li a ⇒ b / ks
-        tblock : ∀{is a b ks}
-          → is ∈-lis a ⇒ b / b ∷ ks
-          → block (a ⇒ b) is ∈-li a ⇒ b / ks
-        tif-else : ∀{ist isf a ks b}
-          → ist ∈-lis a ⇒ b / b ∷ ks
-          → isf ∈-lis a ⇒ b / b ∷ ks
-          → if-else (a ⇒ b) ist isf ∈-li bool ∷ a ⇒ b / ks
-        tloop : ∀{is a b ks}
-          → is ∈-lis a ⇒ b / a ∷ ks
-          → loop (a ⇒ b) is ∈-li a ⇒ b / ks
-        tbrn : ∀{ks b} → {n : Fin (length ks)} → br (toℕ n) ∈-li lookup ks n ⇒ b / ks
-
-      data _∈-lis_ : insns → functype → Set where
-        tliempty : [] ∈-lis [] ⇒ [] / []
-        tliseq : ∀ {i is a b c ks} → i ∈-li a ⇒ b / ks → is ∈-lis b ⇒ c / ks → i ∷ is ∈-lis a ⇒ c / ks
-        tliup : ∀ {is a b d ks ks'} → is ∈-lis a ⇒ b / ks → is ∈-lis a ++ d ⇒ b ++ d / ks ++ ks'
-        tlicast : ∀ {is a b} → is ∈-is a ⇒ b → is ∈-lis a ⇒ b / []
-
-    data _∈-fs_ : frames → ctxtype → Set where
-      tfempty : ∀ {a} → [] ∈-fs (a / [] ↠ a)
-      tfstack : ∀ {vs l cont r k a b c fs ks}
-                → vs ∈-vs r
-                → l ∈-li k ⇒ a / ks
-                → cont ∈-lis a ++ r ⇒ b / ks
-                → fs ∈-fs b / ks ↠ c
-                → (vs , length k , l , cont) ∷ fs ∈-fs a / k ∷ ks ↠ c
-
-    data _∈-s_ : state → resulttype → Set where
-      tstate : ∀ {fs vs is a b c ks}
-               → fs ∈-fs b / ks ↠ c
-               → vs ∈-vs a
-               → is ∈-lis a ⇒ b / ks
-               → (fs , vs , is) ∈-s c
-
-    ∈-vs-append : ∀ {vs vs' ts ts' } → vs ∈-vs ts → vs' ∈-vs ts' → vs ++ vs' ∈-vs ts ++ ts'
-    ∈-vs-append tvempty ps' = ps'
-    ∈-vs-append (tvstack p ps) ps' = tvstack p (∈-vs-append ps ps')
-
-    open Interpreter
-    open import Relation.Binary.PropositionalEquality
-
-
-    safety : ∀{t} → (st : state) → st ∈-s t → ∃ λ st' → (eval1 st ≡ ok st') × (st' ∈-s t)
-    safety ([] , vs , []) p = ([] , vs , []) , (refl , p)
-    safety (fs , vs , const v ∷ is) (tstate pfs pvs (tliseq (textend (tconst pv)) pis)) = (fs , v ∷ vs , is) , (refl , ?)
-    safety ((vs' , _ , _ , cont) ∷ fs , vs , []) (tstate (tfstack pvs' _ pcont pfs) pvs _) = (fs , vs ++ vs' , cont) , (refl , tstate pfs (∈-vs-append pvs pvs') pcont)
