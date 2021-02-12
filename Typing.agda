@@ -12,9 +12,6 @@ import Data.Unit as Unit
 import Data.Product as Product
 import Data.Sum as Sum
 
-
-
-
 import Data.Nat as Nat
 import Data.Bool as Bool
 import Data.Empty as Empty
@@ -50,19 +47,6 @@ module Typing where
     field
       delim : X
       answer : resulttype
-
-  record scopetype : Set where
-    constructor sc
-    field
-      vstacktype : resulttype
-      outputtype : resulttype
-
-  record frametype : Set where
-    constructor fr
-    field
-      vstacktype : resulttype
-      labeltype : resulttype
-      outputtype : resulttype
 
   infix 2 _∈-v_
   infix 2 _∈-vs_
