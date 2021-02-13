@@ -17,6 +17,7 @@ import Data.Nat as Nat
 import Data.Bool as Bool
 import Data.Empty as Empty
 import Data.String as String
+import Data.Maybe as Maybe
 import Monad
 import Category.Monad.State using (IStateT ; StateTIMonad)
 import Category.Monad.Continuation using (DContT ; DContIMonad)
@@ -101,7 +102,7 @@ module Syntax where
 
     show-valtype : valtype → String
     show-valtype unit = "unit"
-    show-valtype nat  = "int"
+    show-valtype nat  = "nat"
     show-valtype bool = "bool"
 
     show-val : val → String
@@ -186,8 +187,6 @@ module Interpreter where
   pop (fs , v ∷ vs , is) = ok (v , fs , vs , is)
   pop st = err "value stack underflow" st
 
-  append : vals → E ⊤
-  append vs' (fs , vs , is) = ok (tt , fs , vs' ++ vs , is)
 
   typeof-val : val → valtype
   typeof-val (cbool _) = bool
@@ -255,18 +254,30 @@ module Interpreter where
   enter : frame → E ⊤
   enter (vs' , a , l , is') (fs , vs , is) = ok (tt , (vs , a , l , is) ∷ fs , vs' , is')
 
+  lookup-label-nargs : ℕ → E ℕ
+  lookup-label-nargs l st@(fs , _ , _) with List.head (List.drop l fs)
+  ...                               | Maybe.just (_ , a , _ , _)  = ok (a , st)
+  ...                               | Maybe.nothing = err "jump terget does not exist" st
+
   leave : E frame
   leave ((vs , a , l , is) ∷ fs , vs' , is') = ok ((vs' , a , l , is') , fs , vs , is)
   leave st = err "control stack underflow" st
 
+  append : vals → E ⊤
+  append vs' (fs , vs , is) = ok (tt , fs , vs' ++ vs , is)
+
+  vswap : vals → E vals
+  vswap vs (fs , vs' , is) = ok (vs' , fs , vs , is)
+
   br-helper : ℕ → E ⊤
   br-helper zero = do
-    vs , a , _ , _ ← leave
-    append (take a vs)
-  br-helper (suc n) = do
-    vs , _ , _ , _ ← leave
-    append vs
-    br-helper n
+    (vs , n , l , _) ← leave
+    emit l
+    append (take n vs)
+  br-helper (suc m) = do
+    (vs , _ , _ , _) ← leave
+    vswap vs
+    br-helper m
 
   einsn : insn → E ⊤
   einsn (const v) = do push v
@@ -309,7 +320,8 @@ module Interpreter where
     vs ← popchks a
     enter (encvals vs , length a , loop (a ⇒ b) is , is)
 
-  einsn (br n) = br-helper n
+  einsn (br n) = do
+    br-helper n
 
   einsn (br-if n) = popchk bool >>= λ where
       false → return tt
@@ -320,17 +332,10 @@ module Interpreter where
     vs , _ , _ , _ ← leave
     append vs
 
-  term : E ⊤
-  term ([] , vs , []) = ok (tt , [] , vs , [])
-  term st = err "state is not terminated" st
-
   estep : E ⊤
-  estep = term <|> (fetch >>= einsn) <|> eend
-
-  eval1 : state → error state
-  eval1 st with estep st
-  ...         | ok (_ , st') = ok st'
-  ...         | err emsg st' = err emsg st'
+  estep st@([] , vs , []) = ok (tt , [] , vs , [])
+  estep st@(fs , vs , []) = eend st
+  estep st@(fs , vs , is) = (fetch >>= einsn) st
 
 module Example where
   open Product
@@ -341,20 +346,22 @@ module Example where
   open String
   open Nat
 
-  ex0 ex1 ex2 ex3 ex4 ex5 ex6 : state
+  ex0 ex1 ex2 ex3 ex4 ex5 ex6 ex7 ex8 : state
   ex0 = ([] , (cnat 1 ∷ cnat 2 ∷ []) , (add ∷ []))
   ex1 = ([] , (cbool true ∷ cnat 1 ∷ cnat 0 ∷ []) , ( not ∷ (if-else (nat ∷ nat ∷ [] ⇒ [ nat ]) [ add ] [ drop ]) ∷ []))
   ex2 = ([] , [] , (block ([] ⇒ [ nat ]) (const (cnat 1) ∷ block ([ nat ] ⇒ [ nat ]) (br 1 ∷ []) ∷ []) ∷ []))
   ex3 = ([] , [] , (drop ∷ []))
   ex4 = ([] , [] , (loop ([] ⇒ nat ∷ nat ∷ []) ([ br 0 ])) ∷ [])
   ex5 = ([] , [] , block ([] ⇒ [ nat ]) (const (cnat 1) ∷ []) ∷ [])
-  ex6 = ([] , cbool true ∷ cbool true ∷ [] , [ add ])
+  ex6 = ([] , cbool true ∷ cbool true ∷ [] , and ∷ [])
+  ex7 = ([] , cbool true ∷ cbool true ∷ [] , add ∷ [])
+  ex8 = ([] , cnat 1 ∷ [] , block (nat ∷ [] ⇒ bool ∷ []) (const (cnat 1) ∷ block (nat ∷ [] ⇒ []) (const (cbool true) ∷ br 1 ∷ []) ∷ []) ∷ [])
 
   evaln : state → ℕ → error vals
   evaln ([] , vs , []) _ = ok vs
   evaln st zero = err "time out" st
-  evaln st (suc n) with eval1 st
-  ...                 | ok st' = evaln st' n
+  evaln st (suc n) with estep st
+  ...                 | ok (tt , st') = evaln st' n
   ...                 | (err emsg st') = err emsg st'
 
   show-result : error vals → String
@@ -365,4 +372,4 @@ module Example where
   show-eval ex = show-state ex ++ " ↪* " ++ show-result (evaln ex 1024)
 
   run : List String
-  run = List.map show-eval (ex0 ∷ ex1 ∷ ex2 ∷ ex3 ∷ ex4 ∷ ex5 ∷ ex6 ∷ [])
+  run = List.map show-eval (ex0 ∷ ex1 ∷ ex2 ∷ ex3 ∷ ex4 ∷ ex5 ∷ ex6 ∷ ex7 ∷ ex8 ∷ [])

@@ -30,6 +30,7 @@ module Typing where
   open Fin
   open List using (_∷_ ; [] ; [_] ; _++_ ; length ; lookup ; List)
   open functype
+  open import Relation.Binary.PropositionalEquality
 
 
   labelstype = List resulttype
@@ -42,10 +43,10 @@ module Typing where
       labels : labelstype
 
   infix 4.5 _↠_
-  record ctxtype {X : Set} : Set where
+  record ctxtype : Set where
     constructor _↠_
     field
-      delim : X
+      delim : lresulttype
       answer : resulttype
 
   infix 2 _∈-v_
@@ -73,26 +74,29 @@ module Typing where
       tsub : ∀{ts ks} → sub ∈-i nat ∷ nat ∷ ts ⇒ nat ∷ ts / ks
       teqz : ∀{ts ks} → eqz ∈-i nat ∷ ts ⇒ bool ∷ ts / ks
       tdup : ∀{t ts ks } → dup ∈-i t ∷ ts ⇒ t ∷ t ∷ ts / ks
-      tdrop : ∀{t ts ks} → drop ∈-i t ∷ ts ⇒ ts / ks
-      tblock : ∀{is a b ts ks}
+      tdrop : ∀{t ts ks} → drop ∈-i t ∷ [] ⇒ [] / ks
+      tblock : ∀{is a b ks}
         → is ∈-is a ⇒ b / b ∷ ks
-        → block (a ⇒ b) is ∈-i a ++ ts ⇒ b ++ ts / ks
+        → block (a ⇒ b) is ∈-i a ⇒ b / ks
       tif-else : ∀{ist isf a ks b ts}
         → ist ∈-is a ⇒ b / b ∷ ks
         → isf ∈-is a ⇒ b / b ∷ ks
-        → if-else (a ⇒ b) ist isf ∈-i bool ∷ a ++ ts ⇒ b ++ ts / ks
-      tloop : ∀{is a b ts ks}
+        → if-else (a ⇒ b) ist isf ∈-i bool ∷ a ⇒ b / ks
+      tloop : ∀{is a b ks}
         → is ∈-is a ⇒ b / a ∷ ks
-        → loop (a ⇒ b) is ∈-i a ++ ts ⇒ b ++ ts / ks
-      tbrn : ∀{ts ks b} → {n : Fin (length ks)} → br (toℕ n) ∈-i lookup ks n ++ ts ⇒ b / ks
-  
+        → loop (a ⇒ b) is ∈-i a ⇒ b / ks
+      tbrn : ∀{ks b n}
+        → (n' : Fin (length ks))
+        → n ≡ toℕ n'
+        → br n ∈-i lookup ks n' ⇒ b / ks
+
     data _∈-is_ : insns → functype → Set where
       tiempty : ∀ {a ks} → [] ∈-is a ⇒ a / ks
-      tiseq : ∀ {i is a b c ks} → i ∈-i a ⇒ b / ks → is ∈-is b ⇒ c / ks → i ∷ is ∈-is a ⇒ c / ks
+      tiseq : ∀ {r i is a b c ks} → i ∈-i a ⇒ b / ks → is ∈-is b ++ r ⇒ c / ks → i ∷ is ∈-is a ++ r ⇒ c / ks
 
   data _∈-fs_ : frames → ctxtype → Set where
     tfempty : ∀ {a} → [] ∈-fs (a / [] ↠ a)
-    tfstack : ∀ {vs l cont r k a b c fs ks}
+    tfstack : ∀ {k ks a b r vs l cont  c fs}
               → vs ∈-vs r
               → l ∈-i k ⇒ a / ks
               → cont ∈-is a ++ r ⇒ b / ks
@@ -106,20 +110,38 @@ module Typing where
              → is ∈-is a ⇒ b / ks
              → (fs , vs , is) ∈-s c
 
-  ∈-vs-append : ∀ {vs vs' ts ts' } → vs ∈-vs ts → vs' ∈-vs ts' → vs ++ vs' ∈-vs ts ++ ts'
+
+  ∈-vs-append : ∀ {vs vs' ts ts'} → vs ∈-vs ts → vs' ∈-vs ts' → vs ++ vs' ∈-vs ts ++ ts'
   ∈-vs-append tvempty ps' = ps'
   ∈-vs-append (tvstack p ps) ps' = tvstack p (∈-vs-append ps ps')
 
-  open Interpreter
-  open import Relation.Binary.PropositionalEquality
+  ∈-vs-take : ∀ {vs ts} → ( n : Nat.ℕ ) → vs ∈-vs ts → List.take n vs ∈-vs List.take n ts
+  ∈-vs-take Nat.zero _ = tvempty
+  ∈-vs-take (Nat.suc n) tvempty = tvempty
+  ∈-vs-take (Nat.suc n) (tvstack p ps) = tvstack p (∈-vs-take n ps)
 
+  length-take : ∀{X : Set} → ∀{ys : List X} → (xs : List X) → List.take (List.length xs) (xs ++ ys) ≡ xs
+  length-take [] = refl
+  length-take (x ∷ xs) = cong (x ∷_) (length-take xs)
+
+  lookup-zero : ∀{X : Set} → ∀{xs : List X} → (x : X) → lookup (x ∷ xs) zero ≡ x
+  lookup-zero x = refl
+
+  length-take-lookup-zero : ∀ {X : Set} → (k : List X) → (ks : List (List X)) → {ts : List X} → List.take (length k) (lookup (k ∷ ks) zero ++ ts) ≡ k
+  length-take-lookup-zero k ks {ts} = subst (λ x → List.take (List.length k) (x ++ ts) ≡ k) (lookup-zero {_} {ks} k) (length-take k)
+
+  open Interpreter
+  eval1 : state → error state
+  eval1 st with estep st
+  ...         | ok (Unit.tt , st') = ok st'
+  ...         | err msg st' = err msg st'
 
   safety : ∀{t} → (st : state) → st ∈-s t → ∃ λ st' → (eval1 st ≡ ok st') × (st' ∈-s t)
   safety ([] , vs , []) p = ([] , vs , []) , (refl , p)
   safety ((vs , _ , _ , cont) ∷ fs , vs' , []) (tstate (tfstack pvs _ pcont pfs) pvs' tiempty) = (fs , vs' ++ vs , cont) , (refl , tstate pfs (∈-vs-append pvs' pvs) pcont)
-  safety (fs , vs , br n ∷ is) (tstate pfs pvs (tiseq (tbrn {n'}) pis)) =
-    let (vs' , a , l , is) = lookup fs n'
-    in (drop (suc n) fs , List.take a vs ++ vs' , l ∷ is) , (refl , ?)
+  safety ((vs' , n , l , cont) ∷ fs , vs , br Nat.zero ∷ is) (tstate (tfstack {k} {ks} {a} {b} {r} pvs' pl pcont pfs) pvs (tiseq (tbrn Fin.zero p) pis)) =
+    (fs , List.take n vs ++ vs' , l ∷ cont) , (refl , tstate pfs (∈-vs-append (∈-vs-take n pvs) pvs') tmp)
+       where tmp = subst (λ x → l ∷ cont ∈-is x ++ r ⇒ b / ks) (sym (length-take-lookup-zero k ks {_})) (tiseq pl pcont)
   safety ([] , vs , (const v) ∷ is) (tstate pfs pvs (tiseq (tconst pv) pis)) = ([] , (v ∷ vs) , is) , (refl , tstate pfs (tvstack pv pvs) pis)
   safety (f ∷ fs , vs , (const v) ∷ is) (tstate pfs pvs (tiseq (tconst pv) pis)) = (f ∷ fs , (v ∷ vs) , is) , (refl , tstate pfs (tvstack pv pvs) pis)
   safety ([] , vs , nop ∷ is) (tstate pfs pvs (tiseq tnop pis)) = ([] , vs , is) , (refl , tstate pfs pvs pis)
