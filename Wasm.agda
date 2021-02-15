@@ -34,6 +34,10 @@ module Syntax where
     open Monad.IList hiding (drop)
     open Monad.IExc
 
+    feqz : ℕ → Bool
+    feqz 0 = true
+    feqz _ = false
+    
     data valtype : Set where
       bool : valtype
       nat : valtype
@@ -78,13 +82,12 @@ module Syntax where
 
     -- we take resulttype as value stack instead of taking sequence of const instruction (so innermost block context does not include value and insts)
     frame : Set
-    frame = vals × Nat.ℕ × insn × insns
+    frame = vals × Nat.ℕ × insns × insns
 
     frames = List frame
 
 
     state = frames × vals × insns
-
 
   module _ where
     open String
@@ -144,7 +147,7 @@ module Syntax where
       show-insn (br-if n) = concat-with-space ("br-if" ∷ NS.show n ∷ [])
 
     show-frame : frame → String
-    show-frame (vs , a , l , is) = show-vals vs ++ "ℓ" ++ NS.show a ++ "{" ++ show-insn l ++ "}" ++ "*" ++ show-insns is
+    show-frame (vs , a , l , is) = show-vals vs ++ "ℓ" ++ NS.show a ++ "{" ++ show-insns l ++ "}" ++ "*" ++ show-insns is
 
     show-frames : frames → String
     show-frames fs = "[" ++ show-list-with-sep show-frame " " fs ++ "]"
@@ -166,176 +169,246 @@ module Interpreter where
   open Category.Monad.State
   module IList = Monad.IList
 
-  import Data.Sum.Categorical.Left as Left
-  module Error = Left (String × state) Level.zero
-  error = Error.Sumₗ
+  data Step (V E S : Set) : Set where
+    ok : S → Step V E S
+    error : E → Step V E S
 
+  bind : ∀{V E A B} → Step V E A → (A → Step V E B) → Step V E B
+  bind (ok x) f = f x
+  bind (error x) _ = error x
+
+  StepMonad : (V E : Set) → RawMonad (Step V E)
+  StepMonad V E = record
+    { return = ok
+    ; _>>=_ = bind
+    }
+
+  state' = vals × insns
   open Category.Monad.State
-  E = IStateT (λ _ → state) error tt tt
 
-  pattern ok a = inj₂ a
-  pattern err a b = inj₁ (a , b)
+  state-machine : Set → Set → (Set → Set)
+  state-machine S V = IStateT (λ where tt → S) (Step V (String × S)) tt tt
 
-  monad = StateTIMonad {_} {⊤} (λ _ → state) Error.monad 
-  open RawMonad monad
+  state-machine-result : Set → Set → (Set → Set)
+  state-machine-result S V X = Step V (String × S) (X × S)
 
+  state-machine-monad : ∀ (S V : Set) → RawMonad (state-machine S V)
+  state-machine-monad S V = StateTIMonad (λ where tt → S) (StepMonad V (String × S))
 
-  push : val → E ⊤
-  push v (fs , vs , is) = ok (tt , fs , (v ∷ vs) , is)
-
-  pop : E val
-  pop (fs , v ∷ vs , is) = ok (v , fs , vs , is)
-  pop st = err "value stack underflow" st
-
-
-  typeof-val : val → valtype
-  typeof-val (cbool _) = bool
-  typeof-val (cnat _) = nat
-  typeof-val (cunit _) = unit
-
-  interp-valtype : valtype → Set
-  interp-valtype bool = Bool
-  interp-valtype nat = ℕ
-  interp-valtype unit = ⊤
-
-  interp-resulttype : resulttype → Set
-  interp-resulttype ts = IList.IList interp-valtype ts
-
-  encval : ∀{t} → interp-valtype t → val
-  encval {bool} v = cbool v
-  encval {unit} v = cunit v
-  encval {nat} v = cnat v
-
-  encvals : ∀{ts} → interp-resulttype ts → vals
-  encvals IList.[] = []
-  encvals (v IList.∷ vs) = encval v ∷ encvals vs
+  pattern ok' a = ok (tt , a)
+  pattern err a b = error (a , b)
 
   infixl 4 _<|>_
-  _<|>_ : ∀ {X} → E X → E X → E X
+  _<|>_ : ∀ {S V X} → state-machine S V X → state-machine S V X → state-machine S V X
   (ma <|> mb) st = ma st |> λ where
-    (ok st') → ok st'
-    (err _ _) → mb st 
+    (err _ _) → mb st
+    s → s
 
-  chkval : (t : valtype) → val → E (interp-valtype t)
-  chkval bool (cbool b) = return b
-  chkval nat (cnat n) = return n
-  chkval unit (cunit tt) = return tt
-  chkval t v st = err (concat-with-space $ show-val v ∷ "has type" ∷ show-valtype (typeof-val v) ∷ "instead of" ∷ show-valtype t ∷ []) st
+  module non where
+    non-framed = state-machine (vals × insns) vals
+    non-framed-result = state-machine-result (vals × insns) vals
+    result-non-framed = Step (vals × insns) vals
 
-  chkvals : (t : resulttype) → vals → E (interp-resulttype t × vals)
-  chkvals (t ∷ ts) (v ∷ vs) = do
-    v' ← chkval t v
-    (vs' , rest) ← chkvals ts vs
-    return (v' IList.∷ vs' , rest)
-  chkvals [] vs = return (IList.[] , vs)
-  chkvals (_ ∷ _) [] st = err "not enough elements in input" st
+    module non-framed-M = RawMonad (state-machine-monad (vals × insns) vals)
+    open non-framed-M
 
-  popchk : (t : valtype) → E (interp-valtype t)
-  popchk t = pop >>= chkval t
+    push : val → non-framed ⊤
+    push v (vs , is) = ok' ((v ∷ vs) , is) 
 
-  popchks : (ts : resulttype) → E (interp-resulttype ts)
-  popchks [] = return IList.[]
-  popchks (t ∷ ts) = do
-    v ← popchk t 
-    vs ← popchks ts
-    return $ v IList.∷ vs
-
-  pushvs : vals → E ⊤
-  pushvs [] = return tt
-  pushvs (v ∷ vs) = push v >> pushvs vs
-
-  fetch : E insn
-  fetch (fs , vs , (i ∷ is)) = ok (i , fs , vs , is)
-  fetch st = err "no instuction to fetch" st
-
-  emit : insn → E ⊤
-  emit i (fs , vs , is) = ok (tt , fs , vs , i ∷ is)
+    pop : non-framed val
+    pop (v ∷ vs , is) = ok (v , vs , is)
+    pop st = err "value stack underflow" st
   
-  enter : frame → E ⊤
-  enter (vs' , a , l , is') (fs , vs , is) = ok (tt , (vs , a , l , is) ∷ fs , vs' , is')
+    typeof-val : val → valtype
+    typeof-val (cbool _) = bool
+    typeof-val (cnat _) = nat
+    typeof-val (cunit _) = unit
+  
+    interp-valtype : valtype → Set
+    interp-valtype bool = Bool
+    interp-valtype nat = ℕ
+    interp-valtype unit = ⊤
+  
+    interp-resulttype : resulttype → Set
+    interp-resulttype ts = IList.IList interp-valtype ts
+  
+    encval : ∀{t} → interp-valtype t → val
+    encval {bool} v = cbool v
+    encval {unit} v = cunit v
+    encval {nat} v = cnat v
+  
+    encvals : ∀{ts} → interp-resulttype ts → vals
+    encvals IList.[] = []
+    encvals (v IList.∷ vs) = encval v ∷ encvals vs
+  
+    chkval : (t : valtype) → val → non-framed (interp-valtype t)
+    chkval bool (cbool b) = return b
+    chkval nat (cnat n) = return n
+    chkval unit (cunit tt) = return tt
+    chkval t v st = err (concat-with-space $ show-val v ∷ "has type" ∷ show-valtype (typeof-val v) ∷ "instead of" ∷ show-valtype t ∷ []) st
+  
+    chkvals : (t : resulttype) → vals → non-framed (interp-resulttype t × vals)
+    chkvals (t ∷ ts) (v ∷ vs) = do
+      v' ← chkval t v
+      (vs' , rest) ← chkvals ts vs
+      return (v' IList.∷ vs' , rest)
+    chkvals [] vs = return (IList.[] , vs)
+    chkvals (_ ∷ _) [] st = err "not enough elements in input" st
+  
+    popchk : (t : valtype) → non-framed (interp-valtype t)
+    popchk t = pop >>= chkval t
+  
+    popchks : (ts : resulttype) → non-framed (interp-resulttype ts)
+    popchks [] = return IList.[]
+    popchks (t ∷ ts) = do
+      v ← popchk t 
+      vs ← popchks ts
+      return $ v IList.∷ vs
+  
+    pushvs : vals → non-framed ⊤
+    pushvs [] = return tt
+    pushvs (v ∷ vs) = push v >> pushvs vs
+  
+    fetch : non-framed insn
+    fetch (vs , (i ∷ is)) = ok (i , vs , is)
+    fetch st = err "no instuction to fetch" st
+  
+    emit : insn → non-framed ⊤
+    emit i (vs , is) = ok' (vs , i ∷ is)
+  
+  
+ 
+    einsn : insn → non-framed ⊤
+    einsn (const v) = do push v
+    einsn nop = return tt
+    einsn and = do
+      x ← popchk bool
+      y ← popchk bool
+      push $ cbool $ x ∧ y
+    einsn not = do
+      x ← popchk bool
+      push $ cbool $ Bool.not x
+    einsn add = do
+      x ← popchk nat
+      y ← popchk nat
+      push $ cnat $ x + y
+    einsn sub = do
+      x ← popchk nat
+      y ← popchk nat
+      push $ cnat $ x ∸ y
+    einsn eqz = do
+      n ← popchk nat
+      push $ cbool (feqz n)
+    einsn dup = do
+      v ← pop
+      push v
+      push v
+    einsn drop = do
+      pop
+      return tt
+    einsn _ = err "illegal instruction"
 
-  lookup-label-nargs : ℕ → E ℕ
-  lookup-label-nargs l st@(fs , _ , _) with List.head (List.drop l fs)
-  ...                               | Maybe.just (_ , a , _ , _)  = ok (a , st)
-  ...                               | Maybe.nothing = err "jump terget does not exist" st
+    eistep : non-framed ⊤
+    eistep = fetch >>= einsn
 
-  leave : E frame
-  leave ((vs , a , l , is) ∷ fs , vs' , is') = ok ((vs' , a , l , is') , fs , vs , is)
-  leave st = err "control stack underflow" st
+    non-ctrl-insn : insn → Bool
+    non-ctrl-insn nop = true
+    non-ctrl-insn and = true
+    non-ctrl-insn not = true
+    non-ctrl-insn add = true
+    non-ctrl-insn sub = true
+    non-ctrl-insn eqz = true
+    non-ctrl-insn dup = true
+    non-ctrl-insn drop = true
+    non-ctrl-insn _ = false
 
-  append : vals → E ⊤
-  append vs' (fs , vs , is) = ok (tt , fs , vs' ++ vs , is)
+  module _ where
+    framed = state-machine (frames × vals × insns) vals
+    framed-result = state-machine-result (frames × vals × insns) vals
+    module framed-M = RawMonad (state-machine-monad (frames × vals × insns) vals)
+    open framed-M 
 
-  vswap : vals → E vals
-  vswap vs (fs , vs' , is) = ok (vs' , fs , vs , is)
+    lift : ∀{X : Set} → non.non-framed X → framed X
+    lift {X} nf (fs , vs , is) = f (nf (vs , is))
+      where f : non.non-framed-result X → framed-result X
+            f (ok (x , s)) = ok (x , fs , s)
+            f (error (e , s)) = error (e , fs , s)
 
-  br-helper : ℕ → E ⊤
-  br-helper zero = do
-    (vs , n , l , _) ← leave
-    emit l
-    append (take n vs)
-  br-helper (suc m) = do
-    (vs , _ , _ , _) ← leave
-    vswap vs
-    br-helper m
+    prepend : insns → framed ⊤
+    prepend is' (fs , vs , is) = ok' (fs , vs , is' ++ is)
 
-  einsn : insn → E ⊤
-  einsn (const v) = do push v
-  einsn nop = return tt
-  einsn and = do
-    x ← popchk bool 
-    y ← popchk bool
-    push $ cbool $ x ∧ y
-  einsn not = do
-    x ← popchk bool
-    push $ cbool $ Bool.not x
-  einsn add = do
-    x ← popchk nat
-    y ← popchk nat
-    push $ cnat $ x + y
-  einsn sub = do
-    x ← popchk nat
-    y ← popchk nat
-    push $ cnat $ x ∸ y
-  einsn eqz = do
-    zero ← popchk nat
-      where suc _ → push $ cbool false
-    push $ cbool true
-  einsn dup = do
-    v ← pop
-    push v
-    push v
-  einsn drop = do
-    pop
-    return tt
-  einsn (block (a ⇒ b) is) = do
-    vs ← popchks a
-    enter (encvals vs , length b , nop , is)
-  einsn (if-else (a ⇒ b) ist isf) = do
-    p ← popchk bool
-    vs ← popchks a
-    if p then enter (encvals vs , length b , nop , ist)
-         else enter (encvals vs , length b , nop , isf)
-  einsn (loop (a ⇒ b) is) = do
-    vs ← popchks a
-    enter (encvals vs , length a , loop (a ⇒ b) is , is)
+    append : vals → framed ⊤
+    append vs' (fs , vs , is) = ok' (fs , vs' ++ vs , is)
 
-  einsn (br n) = do
-    br-helper n
+    split : ℕ → framed vals
+    split n (fs , vs , is) = ok (take n vs , fs , List.drop n vs , is)
+  
+    vswap : vals → framed vals
+    vswap vs (fs , vs' , is) = ok (vs' , fs , vs , is)
 
-  einsn (br-if n) = popchk bool >>= λ where
-      false → return tt
-      true → br-helper n
+    enter : frame → framed ⊤
+    enter (vs' , a , l , is') (fs , vs , is) = ok' ((vs , a , l , is) ∷ fs , vs' , is')
+  
+    lookup-label-nargs : ℕ → framed ℕ
+    lookup-label-nargs l st@(fs , _ , _) with List.head (List.drop l fs)
+    ...                               | Maybe.just (_ , a , _ , _)  = ok (a , st)
+    ...                               | Maybe.nothing = err "jump terget does not exist" st
+  
+    leave : framed frame
+    leave ((vs , a , l , is) ∷ fs , vs' , is') = ok ((vs' , a , l , is') , fs , vs , is)
+    leave st = err "control stack underflow" st
+  
+ 
+    br-helper : ℕ → framed ⊤
+    br-helper zero = do
+      (vs , n , lcont , _) ← leave
+      prepend lcont
+      append (take n vs)
+    br-helper (suc m) = do
+      (vs , _ , _ , _) ← leave
+      vswap vs
+      br-helper m
+  
+    einsn : insn → framed ⊤
+    einsn (block (a ⇒ b) is) = do
+      vs ← split (length a)
+      enter (vs , length b , [] , is)
+    einsn (if-else (a ⇒ b) ist isf) = do
+      p ← lift (non.popchk bool)
+      vs ← split (length a)
+      if p then enter (vs , length b , [] , ist)
+           else enter (vs , length b , [] , isf)
+    einsn (loop (a ⇒ b) is) = do
+      vs ← split (length a)
+      enter (vs , length a , loop (a ⇒ b) is ∷ [] , is)
+  
+    einsn (br n) = do
+      br-helper n
+  
+    einsn (br-if n) = lift (non.popchk bool) >>= λ where
+        false → return tt
+        true → br-helper n
 
-  eend : E ⊤
-  eend = do
-    vs , _ , _ , _ ← leave
-    append vs
+    einsn i = lift (non.einsn i)
 
-  estep : E ⊤
-  estep st@([] , vs , []) = ok (tt , [] , vs , [])
-  estep st@(fs , vs , []) = eend st
-  estep st@(fs , vs , is) = (fetch >>= einsn) st
+    eend : framed ⊤
+    eend = do
+      vs , _ , _ , _ ← leave
+      append vs
+
+    eifstep : framed ⊤
+    eifstep = lift (non.fetch) >>= einsn
+ 
+    estep : framed ⊤
+    estep st@([] , vs , []) = ok' ([] , vs , [])
+    estep st@(fs , vs , i ∷ is) with non.non-ctrl-insn i
+    ...                         | true = (lift non.eistep) st
+    ...                         | false = eifstep st
+    estep st@(f ∷ fs , vs , []) = eend st
+  
+    estepn : ℕ → framed ⊤
+    estepn zero = return tt
+    estepn (suc n) = estep >> estepn n
 
 module Example where
   open Product
@@ -345,6 +418,7 @@ module Example where
   open Bool hiding (not)
   open String
   open Nat
+  open Unit
 
   ex0 ex1 ex2 ex3 ex4 ex5 ex6 ex7 ex8 : state
   ex0 = ([] , (cnat 1 ∷ cnat 2 ∷ []) , (add ∷ []))
@@ -357,19 +431,15 @@ module Example where
   ex7 = ([] , cbool true ∷ cbool true ∷ [] , add ∷ [])
   ex8 = ([] , cnat 1 ∷ [] , block (nat ∷ [] ⇒ bool ∷ []) (const (cnat 1) ∷ block (nat ∷ [] ⇒ []) (const (cbool true) ∷ br 1 ∷ []) ∷ []) ∷ [])
 
-  evaln : state → ℕ → error vals
-  evaln ([] , vs , []) _ = ok vs
-  evaln st zero = err "time out" st
-  evaln st (suc n) with estep st
-  ...                 | ok (tt , st') = evaln st' n
-  ...                 | (err emsg st') = err emsg st'
+  show-colonlist : List String → String
+  show-colonlist = show-list-with-sep (λ x → x) ": " 
 
-  show-result : error vals → String
-  show-result (ok vs) = show-vals vs
-  show-result (err emesg st) = show-list-with-sep (λ x → x) ": " (show-state st ∷ emesg ∷ [])
+  show-result : Step vals (String × state) (⊤ × state) → String
+  show-result (ok' st) = show-colonlist (show-state st ∷ "timeout" ∷ [])
+  show-result (err emesg st) = show-colonlist (show-state st ∷ emesg ∷ [])
 
   show-eval : state → String
-  show-eval ex = show-state ex ++ " ↪* " ++ show-result (evaln ex 1024)
+  show-eval ex = show-state ex ++ " ↪* " ++ show-result (estepn 1024 ex)
 
   run : List String
-  run = List.map show-eval (ex0 ∷ ex1 ∷ ex2 ∷ ex3 ∷ ex4 ∷ ex5 ∷ ex6 ∷ ex7 ∷ ex8 ∷ [])
+  run = (List.map show-eval (ex0 ∷ ex1 ∷ ex2 ∷ ex3 ∷ ex4 ∷ ex5 ∷ ex6 ∷ ex7 ∷ ex8 ∷ []))

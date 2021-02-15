@@ -31,7 +31,7 @@ module Typing where
   open List using (_∷_ ; [] ; [_] ; _++_ ; length ; lookup ; List)
   open functype
   open import Relation.Binary.PropositionalEquality
-
+  open import Data.List.Properties
 
   labelstype = List resulttype
 
@@ -52,6 +52,8 @@ module Typing where
   infix 2 _∈-v_
   infix 2 _∈-vs_
   infix 2 _∈-i_
+  infix 2 _∈-i''_
+  infix 2 _∈-i'_
   infix 2 _∈-is_
   infix 2 _∈-fs_
   infix 2 _∈-s_
@@ -61,94 +63,107 @@ module Typing where
     tunit : cunit Unit.tt ∈-v unit
 
   data _∈-vs_ : vals → resulttype → Set where
-    tvempty : [] ∈-vs []
-    tvstack : ∀{v t vs ts} → v ∈-v t → vs ∈-vs ts → v ∷ vs ∈-vs t ∷ ts
+    tv[] : [] ∈-vs []
+    _tv∷_ : ∀{t ts v vs} → v ∈-v t → vs ∈-vs ts → v ∷ vs ∈-vs t ∷ ts
+
+  data non-empty {X : Set} : List X → Set where
+    singleton : ∀{x} → non-empty (x ∷ [])
+    more : ∀{x xs} → non-empty xs → non-empty (x ∷ xs)
 
   mutual
-    data _∈-i_ : insn → functype → Set where
-      tconst : ∀{v t ts ks} → v ∈-v t → const v ∈-i ts ⇒ t ∷ ts / ks
-      tnop : ∀{ts ks} → nop ∈-i ts  ⇒ ts / ks
-      tnot : ∀{ts ks} → not ∈-i bool ∷ ts ⇒ bool ∷ ts / ks
-      tand : ∀{ts ks} → and ∈-i bool ∷ bool ∷ ts ⇒ bool ∷ ts / ks
-      tadd : ∀{ts ks} → add ∈-i nat ∷ nat ∷ ts ⇒ nat ∷ ts / ks
-      tsub : ∀{ts ks} → sub ∈-i nat ∷ nat ∷ ts ⇒ nat ∷ ts / ks
-      teqz : ∀{ts ks} → eqz ∈-i nat ∷ ts ⇒ bool ∷ ts / ks
-      tdup : ∀{t ts ks } → dup ∈-i t ∷ ts ⇒ t ∷ t ∷ ts / ks
-      tdrop : ∀{t ts ks} → drop ∈-i t ∷ [] ⇒ [] / ks
+    data _∈-i''_ : insn → functype → Set where
+      tconst : ∀{t v} → v ∈-v t → const v ∈-i'' [] ⇒ t ∷ []
+      tnop : nop ∈-i'' [] ⇒ []
+      tnot : not ∈-i'' bool ∷ [] ⇒ bool ∷ []
+      tand : and ∈-i'' bool ∷ bool ∷ [] ⇒ bool ∷ []
+      tadd : add ∈-i'' nat ∷ nat ∷ [] ⇒ nat ∷ []
+      tsub : sub ∈-i'' nat ∷ nat ∷ [] ⇒ nat ∷ []
+      teqz : eqz ∈-i'' nat ∷ [] ⇒ bool ∷ []
+      tdup : ∀{t} → dup ∈-i'' t ∷ [] ⇒ t ∷ t ∷ []
+      tdrop : ∀{t} → drop ∈-i'' t ∷ [] ⇒ []
+
+    data _∈-i'_ : insn → functype → Set where
+      tinsn : ∀{a b ks i} → i ∈-i'' a ⇒ b → i ∈-i' a ⇒ b / []
       tblock : ∀{is a b ks}
         → is ∈-is a ⇒ b / b ∷ ks
-        → block (a ⇒ b) is ∈-i a ⇒ b / ks
-      tif-else : ∀{ist isf a ks b ts}
+        → block (a ⇒ b) is ∈-i' a ⇒ b / ks
+      tif-else : ∀{ist isf a ks b}
         → ist ∈-is a ⇒ b / b ∷ ks
         → isf ∈-is a ⇒ b / b ∷ ks
-        → if-else (a ⇒ b) ist isf ∈-i bool ∷ a ⇒ b / ks
+        → if-else (a ⇒ b) ist isf ∈-i' bool ∷ a ⇒ b / ks
       tloop : ∀{is a b ks}
         → is ∈-is a ⇒ b / a ∷ ks
-        → loop (a ⇒ b) is ∈-i a ⇒ b / ks
+        → loop (a ⇒ b) is ∈-i' a ⇒ b / ks
       tbrn : ∀{ks b n}
         → (n' : Fin (length ks))
         → n ≡ toℕ n'
-        → br n ∈-i lookup ks n' ⇒ b / ks
+        → br n ∈-i' lookup ks n' ⇒ b / ks
+
+    data _∈-i_ : insn → functype → Set where
+      tiup : ∀ {b' a' ks' a ks i}
+           → i ∈-i' a' ⇒ b' / ks'
+           → {a' ≡ List.take (length a') a} → {ks' ≡ List.take (List.length ks') ks}
+           → i ∈-i a ⇒ (b' ++ List.drop (List.length a') a) / ks
 
     data _∈-is_ : insns → functype → Set where
-      tiempty : ∀ {a ks} → [] ∈-is a ⇒ a / ks
-      tiseq : ∀ {r i is a b c ks} → i ∈-i a ⇒ b / ks → is ∈-is b ++ r ⇒ c / ks → i ∷ is ∈-is a ++ r ⇒ c / ks
+      ti[] : ∀ {a ks} → [] ∈-is a ⇒ a / ks
+      _ti∷_ : ∀ {b ks i is a c} → i ∈-i a ⇒ b / ks → is ∈-is b ⇒ c / ks → i ∷ is ∈-is a ⇒ c / ks
 
   data _∈-fs_ : frames → ctxtype → Set where
-    tfempty : ∀ {a} → [] ∈-fs (a / [] ↠ a)
-    tfstack : ∀ {k ks a b r vs l cont  c fs}
-              → vs ∈-vs r
-              → l ∈-i k ⇒ a / ks
-              → cont ∈-is a ++ r ⇒ b / ks
+    tf[] : ∀ {a} → [] ∈-fs a / [] ↠ a
+    _tf∷_ : ∀ {k ks a b r vs lcont cont c fs}
+              → (vs ∈-vs r) × (lcont ∈-is k ⇒ a / ks) × (cont ∈-is a ++ r ⇒ b / ks)
               → fs ∈-fs b / ks ↠ c
-              → (vs , length k , l , cont) ∷ fs ∈-fs a / k ∷ ks ↠ c
+              → (vs , length k , lcont , cont) ∷ fs ∈-fs a / k ∷ ks ↠ c
 
   data _∈-s_ : state → resulttype → Set where
-    tstate : ∀ {fs vs is a b c ks}
+    tstate : ∀ {a b c ks fs vs is}
              → fs ∈-fs b / ks ↠ c
              → vs ∈-vs a
              → is ∈-is a ⇒ b / ks
              → (fs , vs , is) ∈-s c
 
+  _tv++_ : ∀ {vs vs' ts ts'} → vs ∈-vs ts → vs' ∈-vs ts' → vs ++ vs' ∈-vs ts ++ ts'
+  _tv++_ tv[] ps' = ps'
+  _tv++_ (p tv∷ ps) ps' = p tv∷ (ps tv++ ps')
 
-  ∈-vs-append : ∀ {vs vs' ts ts'} → vs ∈-vs ts → vs' ∈-vs ts' → vs ++ vs' ∈-vs ts ++ ts'
-  ∈-vs-append tvempty ps' = ps'
-  ∈-vs-append (tvstack p ps) ps' = tvstack p (∈-vs-append ps ps')
+  _ti++_ : ∀ {is is' a b c ks} → (is ∈-is a ⇒ b / ks) → (is' ∈-is b ⇒ c / ks) → is ++ is' ∈-is a ⇒ c / ks
+  _ti++_ ti[] pis' = pis'
+  _ti++_ (pi ti∷ pis) pis' = pi ti∷ (pis ti++ pis')
 
-  ∈-vs-take : ∀ {vs ts} → ( n : Nat.ℕ ) → vs ∈-vs ts → List.take n vs ∈-vs List.take n ts
-  ∈-vs-take Nat.zero _ = tvempty
-  ∈-vs-take (Nat.suc n) tvempty = tvempty
-  ∈-vs-take (Nat.suc n) (tvstack p ps) = tvstack p (∈-vs-take n ps)
+  tvtake : ∀ {vs ts} → ( n : Nat.ℕ ) → vs ∈-vs ts → List.take n vs ∈-vs List.take n ts
+  tvtake Nat.zero _ = tv[]
+  tvtake (Nat.suc n) tv[] = tv[]
+  tvtake (Nat.suc n) (p tv∷ ps) = p tv∷ (tvtake n ps)
 
-  length-take : ∀{X : Set} → ∀{ys : List X} → (xs : List X) → List.take (List.length xs) (xs ++ ys) ≡ xs
-  length-take [] = refl
-  length-take (x ∷ xs) = cong (x ∷_) (length-take xs)
+  tvdrop : ∀ {vs ts} → ( n : Nat.ℕ ) → vs ∈-vs ts → List.drop n vs ∈-vs List.drop n ts
+  tvdrop Nat.zero p = p
+  tvdrop (Nat.suc n) tv[] = tv[]
+  tvdrop (Nat.suc n) (p tv∷ ps) = (tvdrop n ps)
 
-  lookup-zero : ∀{X : Set} → ∀{xs : List X} → (x : X) → lookup (x ∷ xs) zero ≡ x
+  take-length : ∀{X : Set} → ∀{ys : List X} → (xs : List X) → xs ≡ List.take (List.length xs) (xs ++ ys)
+  take-length [] = refl
+  take-length (x ∷ xs) = cong (x ∷_) (take-length xs)
+
+  lookup-zero : ∀{X : Set} → ∀{xs : List X} → (x : X) → x ≡ lookup (x ∷ xs) zero
   lookup-zero x = refl
 
-  length-take-lookup-zero : ∀ {X : Set} → (k : List X) → (ks : List (List X)) → {ts : List X} → List.take (length k) (lookup (k ∷ ks) zero ++ ts) ≡ k
-  length-take-lookup-zero k ks {ts} = subst (λ x → List.take (List.length k) (x ++ ts) ≡ k) (lookup-zero {_} {ks} k) (length-take k)
+  length-take-lookup-zero : ∀ {X : Set} → (k : List X) → (ks : List (List X)) → {ts : List X} → k ≡ List.take (length k) (lookup (k ∷ ks) zero ++ ts)
+  length-take-lookup-zero k ks {ts} = subst (λ x → k ≡ List.take (List.length k) (x ++ ts)) (lookup-zero {_} {ks} k) (take-length k)
 
   open Interpreter
-  eval1 : state → error state
-  eval1 st with estep st
-  ...         | ok (Unit.tt , st') = ok st'
-  ...         | err msg st' = err msg st'
 
-  safety : ∀{t} → (st : state) → st ∈-s t → ∃ λ st' → (eval1 st ≡ ok st') × (st' ∈-s t)
+  safety : ∀{t} → (st : state) → st ∈-s t → ∃ λ st' → (estep st ≡ ok' st') × (st' ∈-s t)
   safety ([] , vs , []) p = ([] , vs , []) , (refl , p)
-  safety ((vs , _ , _ , cont) ∷ fs , vs' , []) (tstate (tfstack pvs _ pcont pfs) pvs' tiempty) = (fs , vs' ++ vs , cont) , (refl , tstate pfs (∈-vs-append pvs' pvs) pcont)
-  safety ((vs' , n , l , cont) ∷ fs , vs , br Nat.zero ∷ is) (tstate (tfstack {k} {ks} {a} {b} {r} pvs' pl pcont pfs) pvs (tiseq (tbrn Fin.zero p) pis)) =
-    (fs , List.take n vs ++ vs' , l ∷ cont) , (refl , tstate pfs (∈-vs-append (∈-vs-take n pvs) pvs') tmp)
-       where tmp = subst (λ x → l ∷ cont ∈-is x ++ r ⇒ b / ks) (sym (length-take-lookup-zero k ks {_})) (tiseq pl pcont)
-  safety ([] , vs , (const v) ∷ is) (tstate pfs pvs (tiseq (tconst pv) pis)) = ([] , (v ∷ vs) , is) , (refl , tstate pfs (tvstack pv pvs) pis)
-  safety (f ∷ fs , vs , (const v) ∷ is) (tstate pfs pvs (tiseq (tconst pv) pis)) = (f ∷ fs , (v ∷ vs) , is) , (refl , tstate pfs (tvstack pv pvs) pis)
-  safety ([] , vs , nop ∷ is) (tstate pfs pvs (tiseq tnop pis)) = ([] , vs , is) , (refl , tstate pfs pvs pis)
-  safety (f ∷ fs , vs , nop ∷ is) (tstate pfs pvs (tiseq tnop pis)) = (f ∷ fs , vs , is) , (refl , tstate pfs pvs pis)
-  safety ([] , cbool b ∷ vs , not ∷ is) (tstate pfs (tvstack tbool pvs) (tiseq tnot pis)) = ([] , (cbool (Bool.not b)) ∷ vs , is) , (refl , tstate pfs (tvstack tbool pvs) pis)
-  safety (f ∷ fs , cbool b ∷ vs , not ∷ is) (tstate pfs (tvstack tbool pvs) (tiseq tnot pis)) = (f ∷ fs , (cbool (Bool.not b)) ∷ vs , is) , (refl , tstate pfs (tvstack tbool pvs) pis)
-  safety ([] , (cbool b) ∷ (cbool b') ∷ vs , and ∷ is) (tstate pfs (tvstack tbool (tvstack tbool pvs)) (tiseq tand pis)) = ([] , (cbool (b Bool.∧ b')) ∷ vs , is) , (refl , tstate pfs (tvstack tbool pvs) pis)
-  safety (f ∷ fs , (cbool b) ∷ (cbool b') ∷ vs , and ∷ is) (tstate pfs (tvstack tbool (tvstack tbool pvs)) (tiseq tand pis)) = (f ∷ fs , (cbool (b Bool.∧ b')) ∷ vs , is) , (refl , tstate pfs (tvstack tbool pvs) pis)
-  safety ([] , v ∷ vs , drop ∷ is) (tstate pfs (tvstack pv pvs) (tiseq tdrop pis)) = ([] , vs , is) , (refl , tstate pfs pvs pis)
-  safety (f ∷ fs , v ∷ vs , drop ∷ is) (tstate pfs (tvstack pv pvs) (tiseq tdrop pis)) = (f ∷ fs , vs , is) , (refl , tstate pfs pvs pis)
+  safety ((vs , _ , _ , cont) ∷ fs , vs' , []) (tstate ((pvs , _ , pcont) tf∷ pfs) pvs' ti[]) = (fs , vs' ++ vs , cont) , (refl , tstate pfs (pvs' tv++ pvs) pcont)
+  safety ([] , cnat n' ∷ vs , eqz ∷ is) (tstate pfs (tnat tv∷ pvs) ((tiup (tinsn teqz)) ti∷ pis)) = ([] , (cbool (feqz n')) ∷ vs , is) , (refl , tstate pfs (tbool tv∷ pvs) pis)
+  safety ([] , vs , const v ∷ is) (tstate pfs pvs ((tiup (tinsn (tconst pv))) ti∷ pis)) = ([] , (v ∷ vs) , is) , (refl , tstate pfs (pv tv∷ pvs) pis)
+  safety ([] , vs , nop ∷ is) (tstate pfs pvs (tiup (tinsn tnop) ti∷ pis)) = ([] , vs , is) , (refl , tstate pfs pvs pis)
+  safety ([] , cbool b ∷ vs , not ∷ is) (tstate pfs (tbool tv∷ pvs) (tiup (tinsn tnot) ti∷ pis)) = ([] , (cbool (Bool.not b)) ∷ vs , is) , (refl , tstate pfs (tbool tv∷ pvs) pis)
+  safety ([] , cbool b ∷ cbool b' ∷ vs , and ∷ is) (tstate pfs (tbool tv∷ (tbool tv∷ pvs)) ((tiup (tinsn tand)) ti∷ pis)) = ([] , (cbool (b Bool.∧ b')) ∷ vs , is) , (refl , tstate pfs (tbool tv∷ pvs) pis)
+  safety ([] , v ∷ vs , drop ∷ is) (tstate pfs (pv tv∷ pvs) (tiup (tinsn tdrop) ti∷ pis)) = ([] , vs , is) , (refl , tstate pfs pvs pis)
+  safety ([] , cnat n ∷ cnat m ∷ vs , sub ∷ is) (tstate pfs (tnat tv∷ (tnat tv∷ pvs)) (tiup (tinsn tsub) ti∷ pis)) = ([] , (cnat (n Nat.∸ m) ∷ vs , is)) , (refl , tstate pfs (tnat tv∷ pvs) pis)
+  safety ([] , v ∷ vs , dup ∷ is) (tstate pfs (_tv∷_ {t1} pv pvs) ((tiup {b} {ks} (tinsn (tdup {t})) {pp}) ti∷ pis)) = ([] , v ∷ v ∷ vs , is) , (refl , tstate pfs (pv tv∷ (pv tv∷ pvs)) pis)
+  safety ((vs' , n , lcont , cont) ∷ [] , vs , br l ∷ is) (tstate ((pvs' , plcont , pcont) tf∷ pfs) pvs (pi ti∷ pis)) =
+    ([] , List.take n vs ++ vs' , lcont ++ cont) , (refl , tstate pfs ( (tvtake n pvs) tv++ pvs') (plcont ti++ pcont))
+
