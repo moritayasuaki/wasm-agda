@@ -90,7 +90,16 @@ module Syntax where
 
     state = frames × vals × insns
 
-
+    non-ctrl-insn : insn → Bool
+    non-ctrl-insn nop = true
+    non-ctrl-insn and = true
+    non-ctrl-insn not = true
+    non-ctrl-insn add = true
+    non-ctrl-insn sub = true
+    non-ctrl-insn eqz = true
+    non-ctrl-insn dup = true
+    non-ctrl-insn drop = true
+    non-ctrl-insn _ = false
 
   module _ where
     open String
@@ -158,20 +167,13 @@ module Syntax where
     show-state : state → String
     show-state (fs , vs , is) = "(" ++ show-frames fs ++ ", " ++ show-vals vs ++ ", " ++ show-insns is ++ ")"
 
-module Interpreter where
-  open Function 
+module InterpreterCore where
   open String using (String)
-  open Syntax 
   open Category.Monad
-  open Sum
+  open Category.Monad.State
   open Product
   open Unit
-  open List hiding (and)
-  open Nat
-  open Bool hiding (not)
-  open Category.Monad.State
-  module IList = Monad.IList
-
+  open Function
   data Step (V E S : Set) : Set where
     ok : S → Step V E S
     error : E → Step V E S
@@ -205,6 +207,22 @@ module Interpreter where
   (ma <|> mb) st = ma st |> λ where
     (err _ _) → mb st
     s → s
+
+module Interpreter where
+  open Function 
+  open String using (String)
+  open Syntax 
+  open Category.Monad
+  open Sum
+  open Product
+  open Unit
+  open List hiding (and)
+  open Nat
+  open Bool hiding (not)
+  open Category.Monad.State
+  open InterpreterCore public
+  module IList = Monad.IList
+
 
   interp-valtype : valtype → Set
   interp-valtype bool = Bool
@@ -254,7 +272,7 @@ module Interpreter where
   
     module NonFramed where
       einsn : insn → non-framed ⊤
-      einsn const v = do push v
+      einsn (const v) = do push v
       einsn nop = return tt
       einsn and = do
         x ← popchk bool
@@ -281,10 +299,11 @@ module Interpreter where
       einsn drop = do
         pop
         return tt
+      einsn _ = err "illegal instruction"
   
       eistep : non-framed ⊤
       eistep s@(v , []) = ok' s
-      -- eistep s@(v , i ∷ is) = (fetch >>= einsn) s
+      eistep s@(v , i ∷ is) = (fetch >>= einsn) s
 
 
   module _ where
@@ -365,11 +384,9 @@ module Interpreter where
  
     estep : framed ⊤
     estep st@([] , vs , []) = ok' ([] , vs , [])
-    {-
     estep st@(fs , vs , i ∷ is) with non-ctrl-insn i
     ...                         | true = (lift NonFramed.eistep) st
     ...                         | false = eifstep st
-    -}
     estep st@(f ∷ fs , vs , []) = eend st
   
     estepn : ℕ → framed ⊤
@@ -437,94 +454,92 @@ module Conv where
     br-if : ℕ → cinsn
 
   insns = List insn
-  ctrl = cinsn × insns
+  ctrl = insns × cinsn
   ctrls = List ctrl
-  frame = vals × ℕ × ctrl × insns × ctrls
+  frame = vals × ctrls
   frames = List frame
-  state = frames × vals × insns × ctrls
+  state = frames × vals × ctrls × insns
 
-  convert : Syntax.insns → insns × ctrls
-  convert 
+  add-inner : insn → ctrls × insns → ctrls × insns
+  add-inner i ([] , is) = ([] , i ∷ [])
+  add-inner i ((is' , c) ∷ cs , is) = ((i ∷ is' , c) ∷ cs , is)
+  
+  convert : Syntax.insns → ctrls × insns
+  convert [] = [] , [] 
+  convert (Syntax.const v ∷ w) = add-inner (const v) (convert w)
+  convert (Syntax.nop ∷ w) =  add-inner nop (convert w)
+  convert (Syntax.not ∷ w) =  add-inner not (convert w)
+  convert (Syntax.and ∷ w) =  add-inner and (convert w)
+  convert (Syntax.add ∷ w) =  add-inner add (convert w)
+  convert (Syntax.sub ∷ w) =  add-inner sub (convert w)
+  convert (Syntax.eqz ∷ w) =  add-inner eqz (convert w)
+  convert (Syntax.dup ∷ w) =  add-inner dup (convert w)
+  convert (Syntax.drop ∷ w) =  add-inner drop (convert w)
+
+  convert (Syntax.block (a ⇒ b) is ∷ js) =
+    let (cis , js') , (cjs , ks') = convert is , convert js
+    in (([] , block (a ⇒ b)) ∷ cis) ++ ((js' , end (a ⇒ b)) ∷ cjs) , ks'
+
+  convert (Syntax.if-else (a ⇒ b) is js ∷ ks) =
+    let (cis , js') , (cjs , ks') , (cks , ls')  = convert is , convert js , convert ks
+    in (([] , if (a ⇒ b)) ∷ cis) ++ ((js' , else (a ⇒ b)) ∷ cjs) ++ ((ks' , end (a ⇒ b)) ∷ cks) , ls'
+  convert (Syntax.loop (a ⇒ b) is ∷ js) =
+    let (cis , js') , (cjs , ks') = convert is , convert js
+    in (([] , loop (a ⇒ b)) ∷ cis) ++ ((js' , end (a ⇒ b)) ∷ cjs) , ks'
+  convert (Syntax.br n ∷ is) =
+    let (cis , is') = convert is
+    in (([] , br n) ∷ cis) , is'
+  convert (Syntax.br-if n ∷ is) =
+    let (cis , is') = convert is
+    in (([] , br-if n) ∷ cis) , is'
 
   module Ctrls where
-    framed = state-machine (frames × vals × vinsns × ctrls) vals
-    framed-result = state-machine-result (frames × vals × vinsns × ctrls) vals
-    module framed-M = RawMonad (state-machine-monad (frames × vals × vinsns × ctrls) vals)
-    open framed-M 
+    open Unit
+    open InterpreterCore
+    open Category.Monad
+    CN = state-machine state vals
+    CN-result = state-machine-result state vals
+    module CN-M = RawMonad (state-machine-monad state vals)
+    open CN-M 
 
-    prepend : insns → framed ⊤
-    prepend is' (fs , vs , is) = ok' (fs , vs , is' ++ is)
+    push : val → CN ⊤
+    push v (fs , vs , cs , is) = ok' (fs , v ∷ vs , cs , is) 
 
-    append : vals → framed ⊤
-    append vs' (fs , vs , is) = ok' (fs , vs' ++ vs , is)
+    pop : CN val
+    pop (fs , v ∷ vs , cs , is) = ok (v , fs , vs , cs , is)
+    pop st = err "stack underflow" st
 
-    split : ℕ → framed vals
-    split n (fs , vs , is) = ok (take n vs , fs , List.drop n vs , is)
-  
-    vswap : vals → framed vals
-    vswap vs (fs , vs' , is) = ok (vs' , fs , vs , is)
+    leave : CN frame
+    leave ((vs , cs) ∷ fs , vs' , cs' , is) = ok ((vs' , cs') , fs , vs , cs , is)
+    leave st = err "ctrl stack underflow" st
 
-    enter : frame → framed ⊤
-    enter (vs' , a , l , is') (fs , vs , is) = ok' ((vs , a , l , is) ∷ fs , vs' , is')
+    enter : frame → CN ⊤
+    enter (vs' , cs') (fs , vs , cs , is) = ok' ((vs , cs) ∷ fs , vs' , cs' , is)
   
-    lookup-label-nargs : ℕ → framed ℕ
-    lookup-label-nargs l st@(fs , _ , _) with List.head (List.drop l fs)
-    ...                               | Maybe.just (_ , a , _ , _)  = ok (a , st)
-    ...                               | Maybe.nothing = err "jump terget does not exist" st
-  
-    leave : framed frame
-    leave ((vs , a , l , is) ∷ fs , vs' , is') = ok ((vs' , a , l , is') , fs , vs , is)
-    leave st = err "control stack underflow" st
-  
-    br-helper : ℕ → framed ⊤
-    br-helper zero = do
-      (vs , n , lcont , _) ← leave
-      prepend lcont
-      append (take n vs)
-    br-helper (suc m) = do
-      (vs , _ , _ , _) ← leave
-      vswap vs
-      br-helper m
-  
-    ectrl : ctrl → framed ⊤
-    ectrl (block (a ⇒ b) is , cis) = do
-      vs ← split (length a)
-      enter (vs , length b , [] , is)
-    einsn (if-else (a ⇒ b) ist isf) = do
-      p ← lift (popchk bool)
-      vs ← split (length a)
-      if p then enter (vs , length b , [] , ist)
-           else enter (vs , length b , [] , isf)
-    einsn (loop (a ⇒ b) is) = do
-      vs ← split (length a)
-      enter (vs , length a , loop (a ⇒ b) is ∷ [] , is)
-  
-    einsn (br n) = do
-      br-helper n
-  
-    einsn (br-if n) = lift (popchk bool) >>= λ where
-        false → return tt
-        true → br-helper n
+    fetch : CN insn
+    fetch (fs , vs , i ∷ is , cs) = ok (i , fs , vs , is , cs)
+    fetch st = err "no instruction" st
 
-    einsn i = lift (NonFramed.einsn i)
+    cfetch : CN ctrl
+    cfetch (fs , vs , is , c ∷ cs) = ok (c , fs , vs , is , cs)
+    cfetch st = err "no ctrl instruction" st
 
-    eend : framed ⊤
-    eend = do
-      vs , _ , _ , _ ← leave
-      append vs
+    einsn : insn → CN ⊤
+    einsn (const v) = push v
+    einsn nop = return tt
+    einsn drop = pop >> return tt
+    einsn _ = return tt
 
-    eifstep : framed ⊤
-    eifstep = lift fetch >>= einsn
- 
-    estep : framed ⊤
-    estep st@([] , vs , []) = ok' ([] , vs , [])
-    {-
-    estep st@(fs , vs , i ∷ is) with non-ctrl-insn i
-    ...                         | true = (lift NonFramed.eistep) st
-    ...                         | false = eifstep st
-    -}
-    estep st@(f ∷ fs , vs , []) = eend st
-  
-    estepn : ℕ → framed ⊤
-    estepn zero = return tt
-    estepn (suc n) = estep >> estepn n
+    einsns : insns → CN ⊤
+    einsns [] = return tt
+--    einsns (i ∷ is) = einsn i >> einens is
+
+    ectrl : ctrl → CN ⊤
+    ectrl (end (a ⇒ b) , is) ((vs' , cs') ∷ fs , vs , [] , cs) = (einsns is)
+    ectrl (block (a ⇒ b) cs' , is) (fs , vs , [] , cs) = ok' (((drop a vs) , cs') ∷ fs , vs , is , cs)
+    ectrl (if (a ⇒ b) cs' , is) (fs , vs , [] , cs) = ok' (((drop a vs) , cs') ∷ fs , vs , is , cs)
+
+    estep : CN ⊤
+    estep (fs , vs , [] , []) = ok' (fs , vs , [] , [])
+    estep (fs , vs , i ∷ is , cs) = einsn i (fs , vs , is , cs)
+    estep (fs , vs , [] , c ∷ cs) = ectrl c (fs , vs , [] , cs)
