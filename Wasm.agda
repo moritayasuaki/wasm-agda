@@ -426,7 +426,7 @@ module Example where
 
   run : List String
   run = (List.map show-eval (ex0 ∷ ex1 ∷ ex2 ∷ ex3 ∷ ex4 ∷ ex5 ∷ ex6 ∷ ex7 ∷ ex8 ∷ []))
-
+{-
 module Conv where
   open Nat
   open List hiding (and ; drop)
@@ -444,16 +444,17 @@ module Conv where
     dup : insn
     drop : insn
 
-  data cinsn : Set where
-    block : functype → cinsn
-    if : functype → cinsn
-    else : functype → cinsn
-    loop : functype → cinsn
-    end : functype → cinsn
-    br : ℕ → cinsn
-    br-if : ℕ → cinsn
-
   insns = List insn
+
+  data cinsn : Set where
+    block : functype → List (insns × cinsn) →  cinsn
+    if : functype → List (insns × cinsn) → List (insns × cinsn) → cinsn
+    else : functype → List (insns × cinsn) → cinsn
+    loop : functype → List (insns × cinsn) → cinsn
+    end : functype → cinsn
+    br : functype → List (insns × cinsn) → cinsn
+    br-if : functype → List (insns × cinsn) → cinsn
+
   ctrl = insns × cinsn
   ctrls = List ctrl
   frame = vals × ctrls
@@ -478,14 +479,14 @@ module Conv where
 
   convert (Syntax.block (a ⇒ b) is ∷ js) =
     let (cis , js') , (cjs , ks') = convert is , convert js
-    in (([] , block (a ⇒ b)) ∷ cis) ++ ((js' , end (a ⇒ b)) ∷ cjs) , ks'
+    in (([] , block (a ⇒ b) cjs) ∷ cis) ++ ((js' , end (a ⇒ b)) ∷ cjs) , ks'
 
   convert (Syntax.if-else (a ⇒ b) is js ∷ ks) =
     let (cis , js') , (cjs , ks') , (cks , ls')  = convert is , convert js , convert ks
-    in (([] , if (a ⇒ b)) ∷ cis) ++ ((js' , else (a ⇒ b)) ∷ cjs) ++ ((ks' , end (a ⇒ b)) ∷ cks) , ls'
+    in (([] , if (a ⇒ b) cjs cks) ∷ cis) ++ ((js' , else (a ⇒ b) cks) ∷ cjs) ++ ((ks' , end (a ⇒ b)) ∷ cks) , ls'
   convert (Syntax.loop (a ⇒ b) is ∷ js) =
     let (cis , js') , (cjs , ks') = convert is , convert js
-    in (([] , loop (a ⇒ b)) ∷ cis) ++ ((js' , end (a ⇒ b)) ∷ cjs) , ks'
+    in (([] , loop (a ⇒ b) cis) ∷ cis) ++ ((js' , end (a ⇒ b)) ∷ cjs) , ks'
   convert (Syntax.br n ∷ is) =
     let (cis , is') = convert is
     in (([] , br n) ∷ cis) , is'
@@ -516,30 +517,19 @@ module Conv where
     enter : frame → CN ⊤
     enter (vs' , cs') (fs , vs , cs , is) = ok' ((vs , cs) ∷ fs , vs' , cs' , is)
   
-    fetch : CN insn
-    fetch (fs , vs , i ∷ is , cs) = ok (i , fs , vs , is , cs)
-    fetch st = err "no instruction" st
-
-    cfetch : CN ctrl
-    cfetch (fs , vs , is , c ∷ cs) = ok (c , fs , vs , is , cs)
-    cfetch st = err "no ctrl instruction" st
-
     einsn : insn → CN ⊤
     einsn (const v) = push v
     einsn nop = return tt
     einsn drop = pop >> return tt
     einsn _ = return tt
 
-    einsns : insns → CN ⊤
-    einsns [] = return tt
---    einsns (i ∷ is) = einsn i >> einens is
-
     ectrl : ctrl → CN ⊤
-    ectrl (end (a ⇒ b) , is) ((vs' , cs') ∷ fs , vs , [] , cs) = (einsns is)
-    ectrl (block (a ⇒ b) cs' , is) (fs , vs , [] , cs) = ok' (((drop a vs) , cs') ∷ fs , vs , is , cs)
-    ectrl (if (a ⇒ b) cs' , is) (fs , vs , [] , cs) = ok' (((drop a vs) , cs') ∷ fs , vs , is , cs)
+    ectrl (is , end (a ⇒ b)) ((vs' , cs') ∷ fs , vs , [] , cs) = ? 
+    ectrl (is , block (a ⇒ b) cs') (fs , vs , [] , cs) = ok' (((drop a vs) , cs') ∷ fs , vs , is , cs)
+    ectrl (is , if (a ⇒ b) cs') (fs , vs , [] , cs) = ok' (((drop a vs) , cs') ∷ fs , vs , is , cs)
 
     estep : CN ⊤
     estep (fs , vs , [] , []) = ok' (fs , vs , [] , [])
     estep (fs , vs , i ∷ is , cs) = einsn i (fs , vs , is , cs)
     estep (fs , vs , [] , c ∷ cs) = ectrl c (fs , vs , [] , cs)
+-}

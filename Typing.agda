@@ -21,6 +21,99 @@ import Data.Maybe as Maybe
 import Category.Monad.State using (IStateT ; StateTIMonad)
 import Category.Monad.Continuation using (DContT ; DContIMonad)
 
+infix 4.9 _/_ 
+record slash (X : Set) (Y : Set): Set where
+  constructor _/_
+  field
+    left : X
+    right : Y
+
+
+module Lightcheck where
+  open String using (String)
+  open Syntax 
+  open Category.Monad
+  open Sum
+  open Product
+  open Fin
+  open Unit
+  open Empty
+  open Maybe using (Maybe ; just ; nothing)
+  open Bool using (Bool ; if_then_else_ ; true ; false)
+  open Nat using (ℕ ; zero ; suc ; _+_)
+  open List using (_∷_ ; [] ; [_] ; _++_ ; length ; lookup ; List)
+  open Function using (_$_ ; id ; _∘_)
+  open arrow
+  open import Relation.Binary.PropositionalEquality
+  open import Relation.Binary.Structures
+  open import Relation.Nullary
+  open import Data.List.Properties
+
+  valtype-l = ⊤
+  labelstype-l = ℕ
+  resulttype-l = ⊤
+  functype-l = ⊤
+  lresulttype-l = slash resulttype-l labelstype-l
+  lfunctype-l = arrow resulttype-l lresulttype-l
+  lctxtype-l = arrow lresulttype-l lresulttype-l
+  ctxtype-l = arrow lresulttype-l resulttype-l
+
+  infix 2 _:-v_
+  infix 2 _:-vs_
+  infix 2 _:-i_
+  infix 2 _:-i'_
+  infix 2 _:-is_
+  infix 2 _:-f_
+  infix 2 _:-f'_
+  infix 2 _:-fs_
+  infix 2 _:-_
+
+  data _:-v_ : val → valtype-l → Set where
+    tv : ∀{v} → v :-v tt
+
+  data _:-vs_ : vals → resulttype-l → Set where
+    [] : [] :-vs tt
+    _∷_ : ∀{v vs} → (v :-v tt) → vs :-vs tt → (v ∷ vs) :-vs tt
+
+  mutual
+    data _:-i_ : insn → lfunctype-l → Set where
+      tconst : ∀{v} → v :-v tt → const v :-i (tt ⇒ tt / zero)
+      tnop : nop :-i (tt ⇒ tt / zero)
+      tnot : not :-i (tt ⇒ tt / zero)
+      tand : and :-i (tt ⇒ tt / zero)
+      tadd : add :-i (tt ⇒ tt / zero)
+      tsub : sub :-i (tt ⇒ tt / zero)
+      teqz : eqz :-i (tt ⇒ tt / zero)
+      tdup : dup :-i (tt ⇒ tt / zero)
+      tdrop : drop :-i (tt ⇒ tt / zero)
+      tblock : ∀{a b n is}
+            → is :-is (tt ⇒ tt / suc n)
+            → block (a ⇒ b) is :-i (tt ⇒ tt / n)
+      tif-else : ∀{tis fis a b n}
+            → tis :-is (tt ⇒ tt / suc n)
+            → fis :-is (tt ⇒ tt / suc n)
+            → if-else (a ⇒ b) tis fis :-i (tt ⇒ tt / n)
+      tloop : ∀{a b n is}
+            → is :-is (tt ⇒ tt / suc n)
+            → loop (a ⇒ b) is :-i (tt ⇒ tt / n)
+      tbrn : ∀{a b n}
+            → (n' : ℕ)
+            → (f : Fin n)
+            → n' ≡ toℕ f
+            → br n' :-i (tt ⇒ tt / n)
+
+    data _:-is_ : insns → lfunctype-l → Set where
+      [] : ∀ {n} → [] :-is (tt ⇒ tt / n)
+      _∷_ : ∀ {n i is}
+            → i :-i' (tt ⇒ tt / n)
+            → is :-is (tt ⇒ tt / n)
+            → (i ∷ is) :-is (tt ⇒ tt / n)
+
+    _:-i'_ : insn → lfunctype-l → Set
+    i :-i' t = ∃ {A = lfunctype-l × resulttype-l × labelstype-l} λ (tt ⇒ tt / n , tt , m) → (i :-i (tt ⇒ tt / n)) × (t ≡ tt ⇒ tt / (n Nat.+ m))
+
+
+
 module Typing where
   open String using (String)
   open Syntax 
@@ -34,7 +127,7 @@ module Typing where
   open Bool using (Bool ; if_then_else_ ; true ; false)
   open Nat using (ℕ)
   open List using (_∷_ ; [] ; [_] ; _++_ ; length ; lookup ; List)
-  open Function using (_$_ ; id)
+  open Function using (_$_ ; id ; _∘_)
   open arrow
   open import Relation.Binary.PropositionalEquality
   open import Relation.Binary.Structures
@@ -43,18 +136,13 @@ module Typing where
 
   labelstype = List resulttype
 
-  infix 4.9 _/_ 
-  record slash (X : Set) (Y : Set): Set where
-    constructor _/_
-    field
-      right : X
-      left : Y
 
   lresulttype  = slash resulttype labelstype
   lfunctype = arrow resulttype lresulttype
   lctxtype = arrow lresulttype lresulttype
   ctxtype = arrow lresulttype resulttype
 
+  {-
   eqvt : valtype → valtype → Bool
   eqvt bool bool = true
   eqvt nat nat = true
@@ -114,7 +202,7 @@ module Typing where
       (a'' , b'') ← maxf eqvt (a , b) (a' , b')
       p'' ← max eqrt p p'
       just $ a'' ⇒ b'' / p''
-
+  -} 
   infix 2 _:-v_
   infix 2 _:-vs_
   infix 2 _:-i_
@@ -135,18 +223,16 @@ module Typing where
     _∷_ : ∀{t ts v vs} → v :-v t → vs :-vs ts → v ∷ vs :-vs t ∷ ts
 
   mutual
-    data _:-i_ : insn → functype → Set where
-      tconst : ∀{t v} → v :-v t → const v :-i [] ⇒ t ∷ []
-      tnop : nop :-i [] ⇒ []
-      tnot : not :-i bool ∷ [] ⇒ bool ∷ []
-      tand : and :-i bool ∷ bool ∷ [] ⇒ bool ∷ []
-      tadd : add :-i nat ∷ nat ∷ [] ⇒ nat ∷ []
-      tsub : sub :-i nat ∷ nat ∷ [] ⇒ nat ∷ []
-      teqz : eqz :-i nat ∷ [] ⇒ bool ∷ []
-      tdup : ∀{t} → dup :-i t ∷ [] ⇒ t ∷ t ∷ []
-      tdrop : ∀{t} → drop :-i t ∷ [] ⇒ []
-data insns × ctrli :: insns
-    data _:-ci_ : insns → lfunctype
+    data _:-i_ : insn → lfunctype → Set where
+      tconst : ∀{t v} → v :-v t → const v :-i [] ⇒ t ∷ [] / []
+      tnop : nop :-i [] ⇒ [] / []
+      tnot : not :-i bool ∷ [] ⇒ bool ∷ [] / []
+      tand : and :-i bool ∷ bool ∷ [] ⇒ bool ∷ [] / []
+      tadd : add :-i nat ∷ nat ∷ [] ⇒ nat ∷ [] / []
+      tsub : sub :-i nat ∷ nat ∷ [] ⇒ nat ∷ [] / []
+      teqz : eqz :-i nat ∷ [] ⇒ bool ∷ [] / []
+      tdup : ∀{t} → dup :-i t ∷ [] ⇒ t ∷ t ∷ [] / []
+      tdrop : ∀{t} → drop :-i t ∷ [] ⇒ [] / []
       tblock : ∀{a b p is}
             → is :-is a ⇒ b / b ∷ p
             → block (a ⇒ b) is :-i a ⇒ b / p
@@ -235,9 +321,13 @@ data insns × ctrli :: insns
   open Interpreter
   safety : ∀{t} → (st : state) → st :- t → ∃ λ st' → (estep st ≡ ok' st') × (st' :- t)
   safety ([] , vs , []) p = ([] , vs , []) , (refl , p)
-  safety ((vs , _ , _ , cis) ∷ fs , vs' , []) (tstate {a'} (((a / p ⇒ b / q , r) , (tframe _ pvs pcis) , eq) ∷ pfs) pvs' []) = (fs , vs' ++ vs , cis) , (refl , tstate pfs (pvs' tv++ pvs) ({!!}))
-  -- ?0 : cis :-is a₁ ++ c ⇒ b₁
-  -- ?1 : 
+  safety ((vs , _ , _ , cis) ∷ fs , vs' , []) (tstate {a = a'} (_∷_ {b = b'} ((a / p ⇒ b / q , r) , (tframe {c = c'}  _ pvs pcis) , eq) pfs) pvs' []) =
+    let eqa' = cong (slash.left ∘ arrow.dom) eq in
+    let eqb' = cong arrow.cod eq in
+    let pcis' = subst (λ x → cis :-is x ++ c' ⇒ b / q) (sym eqa') pcis in
+    let pcis'' = subst (λ y → cis :-is a' ++ c' ⇒ b / q) (sym eqa') pcis' in
+    (fs , vs' ++ vs , cis) , (refl , tstate pfs (pvs' tv++ pvs) {!!})
+  -- ?0 : cis :-is a' ++ c' ⇒ b'
   -- pcis : cis :-is a ++ c ⇒ b / q
   -- eq : a₁ / p₁ ⇒ b₁ ≡ a / a₂ ∷ q ++ r ⇒ b / q ++ r
 
