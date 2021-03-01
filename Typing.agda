@@ -54,6 +54,18 @@ module _ where
                    let d = (sym (lemma3' b c)) in
                    let e = trans p' d in sym e
 
+  lemma4' : ∀ {X : Set} → (b c : List X) → c ≡ drop (length b) (b ++ c)
+  lemma4' [] ys = refl
+  lemma4' (x ∷ xs) ys = let p = lemma4' xs ys
+                         in trans p (t2 (length xs))
+                         where t2 : ∀ n → drop n (xs ++ ys) ≡ drop (suc n) (x ∷ xs ++ ys)
+                               t2 n = refl
+
+  lemma4 : ∀ {X : Set} → (a b c : List X) → a ≡ b ++ c → c ≡ drop (length b) a
+  lemma4 a b c p = let p' = cong (λ x → drop (length b) x) p in
+                   let d = (sym (lemma4' b c)) in
+                   let e = trans p' d in sym e
+
 module Typing where
   open String using (String)
   open Syntax 
@@ -238,14 +250,10 @@ module Typing where
   _ti++_ (pi ∷ pis) pis' = pi ∷ (pis ti++ pis')
 
   exeq-lfunctype : ∀{a a' b b' : resulttype} → ∀{p p' : labelstype} → a ⇒ b / p ≡ a' ⇒ b' / p' → a ≡ a' × b ≡ b' × p ≡ p' 
-  exeq-lfunctype p = cong dom p , cong (left ∘ cod) p , cong (right ∘ cod) p
-    where open arrow
-          open slash
+  exeq-lfunctype refl = refl , refl , refl
 
   exeq-lctxtype : ∀{a a' b b' : resulttype} → ∀{p p' q q' : labelstype} → a / p ⇒ b / q ≡ a' / p' ⇒ b' / q' → a ≡ a' × p ≡ p' × b ≡ b' × q ≡ q'
-  exeq-lctxtype p = cong (left ∘ dom) p , cong (right ∘ dom) p , cong (left ∘ cod) p , cong (right ∘ cod) p
-    where open arrow
-          open slash
+  exeq-lctxtype refl = refl , refl , refl , refl
 
   weaken:-is : ∀{is a b p} → (c : resulttype) → (q : labelstype) → is :-is a ⇒ b / p → is :-is a ++ c ⇒ b ++ c / p ++ q
   weaken:-is c q [] = []
@@ -331,11 +339,11 @@ module Typing where
     where drop'' : resulttype → resulttype
           drop'' (x ∷ xs) = xs
           drop'' [] = []
-  safety ([] , vs , block (a ⇒ b) is ∷ cis) (tstate {a = a'} {b = b'} {c} pfs pvs (_∷_ {a = a'} {b = b''} {c = c''} pi' pcis)) with pi'
-  ... | (a ⇒ b / p , q , r) , (tblock {a} {b} {p} pis' , a'⇒b1/p1≡a++q⇒b++q/p++r) =
-    let (a'≡a++q , b1≡b++q , p≡f++r) = exeq-lfunctype a'⇒b1/p1≡a++q⇒b++q/p++r in
+  safety ([] , vs , block (a ⇒ b) is ∷ cis) (tstate {a = a'} {b = b' / p''} {c} pfs pvs (_∷_ {a = a'} {b = b''} {c = b'} {p = p''} pi' pcis)) with pi'
+  ... | (a ⇒ b / p , q , r) , (tblock {a} {b} {p} pis' , a'⇒b''/p''≡a++q⇒b++q/p++r) =
+    let (a'≡a++q , b''≡b++q , p≡f++r) = exeq-lfunctype a'⇒b''/p''≡a++q⇒b++q/p++r in
     let pr' = lemma3 a' a q a'≡a++q in
     let pr'' = subst (λ x → is :-is x ⇒ b / b ∷ p) pr' pis' in
     ((List.drop (length a) vs , length b , [] , cis) ∷ [] , List.take (length a) vs , is) ,
-    (refl , tstate (_∷_ (({!!} , {!!}) , tframe [] (tvdrop (length a) pvs) {!!} , {!!})  pfs) (tvtake (length a) pvs) pr'')
-      where 
+    (refl , tstate (((b'' / b'' ∷ [] ⇒ {!!} / {!!} , []) , tframe [] (tvdrop (length a) pvs) {!!} , {!!}) ∷ pfs) (tvtake (length a) pvs) pr'')
+      where pcis' = pcis
