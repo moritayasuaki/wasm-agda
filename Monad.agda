@@ -22,6 +22,20 @@ import Data.String as String
 import Category.Monad.State using (IStateT ; StateTIMonad)
 import Category.Monad.Continuation using (DContT ; DContIMonad)
 
+module _ where
+  open List
+  open Product
+
+  data List' (X Y : Set) : Set where
+    [_]' : X → List' X Y
+    _∷'_ : X × Y → List' X Y → List' X Y
+
+  record List'' (X Y : Set) : Set where
+    constructor _∷''_
+    field
+      head'' : X
+      tail'' : List (Y × X)
+
 module IList where
   open List using (List ; [] ; _∷_)
   open Product

@@ -28,91 +28,31 @@ record slash (X : Set) (Y : Set): Set where
     left : X
     right : Y
 
-
-module Lightcheck where
-  open String using (String)
-  open Syntax 
-  open Category.Monad
-  open Sum
-  open Product
-  open Fin
-  open Unit
-  open Empty
-  open Maybe using (Maybe ; just ; nothing)
-  open Bool using (Bool ; if_then_else_ ; true ; false)
-  open Nat using (ℕ ; zero ; suc ; _+_)
-  open List using (_∷_ ; [] ; [_] ; _++_ ; length ; lookup ; List)
-  open Function using (_$_ ; id ; _∘_)
-  open arrow
-  open import Relation.Binary.PropositionalEquality
-  open import Relation.Binary.Structures
-  open import Relation.Nullary
+module _ where
+  open List
+  open Nat
   open import Data.List.Properties
+  open import Relation.Binary.PropositionalEquality
+  lemma : ∀ {X : Set} → (ab a b c : List X) → (ab ≡ a ++ b) → a ++ b ++ c ≡ (ab ++ c)
+  lemma ab a b c ab=a++b = sym proof
+    where
+      ab++c=[a++b]++c = cong (List._++ c) ab=a++b
+      [a++b]++c=a++b++c = ++-assoc a b c
+      proof = trans ab++c=[a++b]++c [a++b]++c=a++b++c 
+  lemma2 : ∀ {X : Set} → (a : List X) → a ++ [] ≡ a
+  lemma2 a = ++-identityʳ a
 
-  valtype-l = ⊤
-  labelstype-l = ℕ
-  resulttype-l = ⊤
-  functype-l = ⊤
-  lresulttype-l = slash resulttype-l labelstype-l
-  lfunctype-l = arrow resulttype-l lresulttype-l
-  lctxtype-l = arrow lresulttype-l lresulttype-l
-  ctxtype-l = arrow lresulttype-l resulttype-l
+  lemma3' : ∀ {X : Set} → (b c : List X) → b ≡ take (length b) (b ++ c)
+  lemma3' [] ys = refl
+  lemma3' (x ∷ xs) ys = let p = cong (x ∷_) (lemma3' xs ys)
+                         in trans p (t2 (length xs))
+                         where t2 : ∀ n → x ∷ take n (xs ++ ys) ≡ take (suc n) (x ∷ xs ++ ys)
+                               t2 n = refl
 
-  infix 2 _:-v_
-  infix 2 _:-vs_
-  infix 2 _:-i_
-  infix 2 _:-i'_
-  infix 2 _:-is_
-  infix 2 _:-f_
-  infix 2 _:-f'_
-  infix 2 _:-fs_
-  infix 2 _:-_
-
-  data _:-v_ : val → valtype-l → Set where
-    tv : ∀{v} → v :-v tt
-
-  data _:-vs_ : vals → resulttype-l → Set where
-    [] : [] :-vs tt
-    _∷_ : ∀{v vs} → (v :-v tt) → vs :-vs tt → (v ∷ vs) :-vs tt
-
-  mutual
-    data _:-i_ : insn → lfunctype-l → Set where
-      tconst : ∀{v} → v :-v tt → const v :-i (tt ⇒ tt / zero)
-      tnop : nop :-i (tt ⇒ tt / zero)
-      tnot : not :-i (tt ⇒ tt / zero)
-      tand : and :-i (tt ⇒ tt / zero)
-      tadd : add :-i (tt ⇒ tt / zero)
-      tsub : sub :-i (tt ⇒ tt / zero)
-      teqz : eqz :-i (tt ⇒ tt / zero)
-      tdup : dup :-i (tt ⇒ tt / zero)
-      tdrop : drop :-i (tt ⇒ tt / zero)
-      tblock : ∀{a b n is}
-            → is :-is (tt ⇒ tt / suc n)
-            → block (a ⇒ b) is :-i (tt ⇒ tt / n)
-      tif-else : ∀{tis fis a b n}
-            → tis :-is (tt ⇒ tt / suc n)
-            → fis :-is (tt ⇒ tt / suc n)
-            → if-else (a ⇒ b) tis fis :-i (tt ⇒ tt / n)
-      tloop : ∀{a b n is}
-            → is :-is (tt ⇒ tt / suc n)
-            → loop (a ⇒ b) is :-i (tt ⇒ tt / n)
-      tbrn : ∀{a b n}
-            → (n' : ℕ)
-            → (f : Fin n)
-            → n' ≡ toℕ f
-            → br n' :-i (tt ⇒ tt / n)
-
-    data _:-is_ : insns → lfunctype-l → Set where
-      [] : ∀ {n} → [] :-is (tt ⇒ tt / n)
-      _∷_ : ∀ {n i is}
-            → i :-i' (tt ⇒ tt / n)
-            → is :-is (tt ⇒ tt / n)
-            → (i ∷ is) :-is (tt ⇒ tt / n)
-
-    _:-i'_ : insn → lfunctype-l → Set
-    i :-i' t = ∃ {A = lfunctype-l × resulttype-l × labelstype-l} λ (tt ⇒ tt / n , tt , m) → (i :-i (tt ⇒ tt / n)) × (t ≡ tt ⇒ tt / (n Nat.+ m))
-
-
+  lemma3 : ∀ {X : Set} → (a b c : List X) → a ≡ b ++ c → b ≡ take (length b) a
+  lemma3 a b c p = let p' = cong (λ x → take (length b) x) p in
+                   let d = (sym (lemma3' b c)) in
+                   let e = trans p' d in sym e
 
 module Typing where
   open String using (String)
@@ -127,7 +67,7 @@ module Typing where
   open Bool using (Bool ; if_then_else_ ; true ; false)
   open Nat using (ℕ)
   open List using (_∷_ ; [] ; [_] ; _++_ ; length ; lookup ; List)
-  open Function using (_$_ ; id ; _∘_)
+  open Function using (_$_ ; id ; _∘_ ; _|>_)
   open arrow
   open import Relation.Binary.PropositionalEquality
   open import Relation.Binary.Structures
@@ -135,7 +75,6 @@ module Typing where
   open import Data.List.Properties
 
   labelstype = List resulttype
-
 
   lresulttype  = slash resulttype labelstype
   lfunctype = arrow resulttype lresulttype
@@ -260,6 +199,9 @@ module Typing where
     _:-i'_ : insn → lfunctype → Set
     i :-i' t = ∃ {A = lfunctype × resulttype × labelstype} λ (a ⇒ b / p , c , q) → (i :-i a ⇒ b / p) × (t ≡ a ++ c ⇒ b ++ c / p ++ q)
 
+  weaken:-i : ∀{a b p i} → (c : resulttype) → (q : labelstype) → (i :-i a ⇒ b / p) → i :-i' a ++ c ⇒ b ++ c / p ++ q
+  weaken:-i {a} {b} {p} {i} c q pi = (a ⇒ b / p , c , q) , (pi , refl)
+
   data _:-f_ : frame → lctxtype → Set where
     tframe : ∀ {a b p c d vs lis n cis}
              → lis :-is a ⇒ b / p
@@ -269,7 +211,10 @@ module Typing where
 
   _:-f'_ : frame → lctxtype → Set
   f :-f' t = ∃ {A = lctxtype × labelstype} λ (a / p ⇒ b / q , r) → (f :-f a / p ⇒ b / q) × (t ≡ a / p ++ r ⇒ b / q ++ r)
-  
+
+  weaken:-f : ∀{a p b q f} → (r : labelstype) → (f :-f a / p ⇒ b / q) → f :-f' a / p ++ r ⇒ b / q ++ r
+  weaken:-f {a} {p} {b} {q} {f} r pf = (a / p ⇒  b / q , r) , (pf , refl)
+
   data _:-fs_ : frames → ctxtype → Set where
     []  : ∀ {a} → [] :-fs a / [] ⇒ a
     _∷_ : ∀ {f fs a b c}
@@ -292,6 +237,28 @@ module Typing where
   _ti++_ [] pis' = pis'
   _ti++_ (pi ∷ pis) pis' = pi ∷ (pis ti++ pis')
 
+  exeq-lfunctype : ∀{a a' b b' : resulttype} → ∀{p p' : labelstype} → a ⇒ b / p ≡ a' ⇒ b' / p' → a ≡ a' × b ≡ b' × p ≡ p' 
+  exeq-lfunctype p = cong dom p , cong (left ∘ cod) p , cong (right ∘ cod) p
+    where open arrow
+          open slash
+
+  exeq-lctxtype : ∀{a a' b b' : resulttype} → ∀{p p' q q' : labelstype} → a / p ⇒ b / q ≡ a' / p' ⇒ b' / q' → a ≡ a' × p ≡ p' × b ≡ b' × q ≡ q'
+  exeq-lctxtype p = cong (left ∘ dom) p , cong (right ∘ dom) p , cong (left ∘ cod) p , cong (right ∘ cod) p
+    where open arrow
+          open slash
+
+  weaken:-is : ∀{is a b p} → (c : resulttype) → (q : labelstype) → is :-is a ⇒ b / p → is :-is a ++ c ⇒ b ++ c / p ++ q
+  weaken:-is c q [] = []
+  weaken:-is {i ∷ is} {a} {b} {p} c q (_∷_ {b = d} pi' pis) with pi'
+  ... | (a' ⇒ d' / p' , c' , q') , (pi , eq) =
+    let (a≡a'++c' , d≡d'++c' , p≡p'++q') = exeq-lfunctype eq in
+    let pi-w = weaken:-i (c' ++ c) (q' ++ q) pi |>
+               subst (λ x → i :-i' x ⇒ d' ++ c' ++ c / p' ++ q' ++ q) (lemma a a' c' c a≡a'++c') |>
+               subst (λ x → i :-i' a ++ c ⇒ x / p' ++ q' ++ q) (lemma d d' c' c d≡d'++c') |>
+               subst (λ x → i :-i' a ++ c ⇒ d ++ c / x) (lemma p p' q' q p≡p'++q') in
+    let pis-w = weaken:-is c q pis in pi-w ∷ pis-w
+
+
   {-
   _tf++_ : ∀ {fs fs' a b c} → (fs :-fs a ⇒ b) → (fs' :-fs b ⇒ c) → fs ++ fs' :-fs a ⇒ c
   _tf++_ [] pfs' = pfs'
@@ -303,7 +270,7 @@ module Typing where
   tvtake (Nat.suc n) [] = []
   tvtake (Nat.suc n) (p ∷ ps) = p ∷ (tvtake n ps)
 
-  tvdrop : ∀ {vs ts} → ( n : Nat.ℕ ) → vs :-vs ts → List.drop n vs :-vs List.drop n ts
+  tvdrop : ∀ {vs ts} → ( n : Nat.ℕ ) → vs :-vs ts → List.drop n vs :-vs List.drop n ts 
   tvdrop Nat.zero p = p
   tvdrop (Nat.suc n) [] = []
   tvdrop (Nat.suc n) (p ∷ ps) = (tvdrop n ps)
@@ -321,26 +288,54 @@ module Typing where
   open Interpreter
   safety : ∀{t} → (st : state) → st :- t → ∃ λ st' → (estep st ≡ ok' st') × (st' :- t)
   safety ([] , vs , []) p = ([] , vs , []) , (refl , p)
-  safety ((vs , _ , _ , cis) ∷ fs , vs' , []) (tstate {a = a'} (_∷_ {b = b'} ((a / p ⇒ b / q , r) , (tframe {c = c'}  _ pvs pcis) , eq) pfs) pvs' []) =
-    let eqa' = cong (slash.left ∘ arrow.dom) eq in
-    let eqb' = cong arrow.cod eq in
-    let pcis' = subst (λ x → cis :-is x ++ c' ⇒ b / q) (sym eqa') pcis in
-    let pcis'' = subst (λ y → cis :-is a' ++ c' ⇒ b / q) (sym eqa') pcis' in
-    (fs , vs' ++ vs , cis) , (refl , tstate pfs (pvs' tv++ pvs) {!!})
-  -- ?0 : cis :-is a' ++ c' ⇒ b'
-  -- pcis : cis :-is a ++ c ⇒ b / q
-  -- eq : a₁ / p₁ ⇒ b₁ ≡ a / a₂ ∷ q ++ r ⇒ b / q ++ r
-
-  {-
-  safety ([] , nat n' ∷ vs , eqz ∷ is) (tstate pfs (tnat tv∷ pvs) ((tiup (tinsn teqz)) ti∷ pis)) = ([] , (bool (feqz n')) ∷ vs , is) , (refl , tstate pfs (tbool tv∷ pvs) pis)
-  safety ([] , vs , const v ∷ is) (tstate pfs pvs ((tiup (tinsn (tconst pv))) ti∷ pis)) = ([] , (v ∷ vs) , is) , (refl , tstate pfs (pv tv∷ pvs) pis)
-  safety ([] , vs , nop ∷ is) (tstate pfs pvs (tiup (tinsn tnop) ti∷ pis)) = ([] , vs , is) , (refl , tstate pfs pvs pis)
-  safety ([] , bool b ∷ vs , not ∷ is) (tstate pfs (tbool tv∷ pvs) (tiup (tinsn tnot) ti∷ pis)) = ([] , (bool (Bool.not b)) ∷ vs , is) , (refl , tstate pfs (tbool tv∷ pvs) pis)
-  safety ([] , bool b ∷ bool b' ∷ vs , and ∷ is) (tstate pfs (tbool tv∷ (tbool tv∷ pvs)) ((tiup (tinsn tand)) ti∷ pis)) = ([] , (bool (b Bool.∧ b')) ∷ vs , is) , (refl , tstate pfs (tbool tv∷ pvs) pis)
-  safety ([] , v ∷ vs , drop ∷ is) (tstate pfs (pv tv∷ pvs) (tiup (tinsn tdrop) ti∷ pis)) = ([] , vs , is) , (refl , tstate pfs pvs pis)
-  safety ([] , nat n ∷ nat m ∷ vs , sub ∷ is) (tstate pfs (tnat tv∷ (tnat tv∷ pvs)) (tiup (tinsn tsub) ti∷ pis)) = ([] , (nat (n Nat.∸ m) ∷ vs , is)) , (refl , tstate pfs (tnat tv∷ pvs) pis)
-  safety ([] , v ∷ vs , dup ∷ is) (tstate pfs (_tv∷_ {t1} pv pvs) ((tiup {b} {ks} (tinsn (tdup {t})) {pp}) ti∷ pis)) = ([] , v ∷ v ∷ vs , is) , (refl , tstate pfs (pv tv∷ (pv tv∷ pvs)) pis)
-  safety ((vs' , n , lcont , cont) ∷ [] , vs , br l ∷ is) (tstate ((pvs' , plcont , pcont) tf∷ pfs) pvs (pi ti∷ pis)) =
-    ([] , List.take n vs ++ vs' , lcont ++ cont) , (refl , tstate pfs ( (tvtake n pvs) tv++ pvs') (plcont ti++ pcont))
-
--}
+  safety ((vs , _ , _ , cis) ∷ fs , vs' , []) (tstate (_∷_ {a = a / p'} {b = c / p} pf' pfs) pvs' []) with pf'
+  ... | (a' / l ∷ q ⇒ c' / _ , r) , (pf  , eq) with pf
+  ...   | tframe {a = l} {b = a'} {c = b} {d = c'}  _ pvs pcis =
+    let (a≡a' , p'≡l∷q++r , c≡c' , p≡q++r) = exeq-lctxtype eq in
+    let cis:a++b⇒c/p = pcis |>
+                       subst (λ x → cis :-is x ++ b ⇒ c' / q) (sym a≡a') |>
+                       subst (λ x → cis :-is a ++ b ⇒ x / q) (sym c≡c') |>
+                       weaken:-is [] r |>
+                       subst (λ x → cis :-is (a ++ b) ++ [] ⇒ c ++ [] / x) (sym p≡q++r) |>
+                       subst (λ x → cis :-is x ⇒ c ++ [] / p) (lemma2 (a ++ b)) |>
+                       subst (λ x → cis :-is a ++ b ⇒ x / p) (lemma2 c) in 
+    (fs , vs' ++ vs , cis) , (refl , tstate pfs (pvs' tv++ pvs) cis:a++b⇒c/p)
+  safety ([] , vs , const x ∷ is) (tstate {b = b} pfs pvs (pi' ∷ pis)) with pi'
+  ... | (_ , _ , r) , (tconst {t = t} pv , eq) =
+    let (b≡c' , a≡t∷c' , _) = exeq-lfunctype eq in
+    let proof = pis |>
+                subst (λ x → is :-is x ⇒ b) a≡t∷c' |>
+                subst (λ x → is :-is t ∷ x ⇒ b) (sym b≡c') in
+    ([] , x ∷ vs , is) , (refl , tstate pfs (pv ∷ pvs) proof)
+  safety ([] , vs , nop ∷ is) (tstate {b = b} pfs pvs (pi' ∷ pis)) with pi'
+  ... | _ , (tnop , eq) =
+    let (a'≡b , a≡b , _) = exeq-lfunctype eq in
+    let proof = pis |>
+                subst (λ x → is :-is x ⇒ b) (trans a≡b (sym a'≡b)) in
+    ([] , vs , is) , (refl , tstate pfs pvs proof)
+  safety ([] , v ∷ vs , dup ∷ is) (tstate {b = b} pfs (pv ∷ pvs) (pi' ∷ pis)) with pi'
+  ... | _ , (tdup , eq) =
+    let (a≡b , b≡ttd , _) = exeq-lfunctype eq in
+    let proof = pis |>
+                subst (λ x → is :-is x ⇒ b) (trans b≡ttd (sym (cong dup'' a≡b))) in
+    ([] , v ∷ v ∷ vs , is) , (refl , tstate pfs (pv ∷ pv ∷ pvs) proof)
+    where dup'' : resulttype → resulttype
+          dup'' (x ∷ xs) = x ∷ x ∷ xs
+          dup'' [] = []
+  safety ([] , v ∷ vs , drop ∷ is) (tstate {b = b} pfs (pv ∷ pvs) (pi' ∷ pis)) with pi'
+  ... | _ , (tdrop , eq) =
+    let (a≡b , b≡d , _) = exeq-lfunctype eq in
+    let proof = pis |>
+                subst (λ x → is :-is x ⇒ b) (trans b≡d (sym (cong drop'' a≡b))) in
+    ([] , vs , is) , (refl , tstate pfs pvs proof)
+    where drop'' : resulttype → resulttype
+          drop'' (x ∷ xs) = xs
+          drop'' [] = []
+  safety ([] , vs , block (a ⇒ b) is ∷ cis) (tstate {a = a'} {b = b'} {c} pfs pvs (_∷_ {a = a'} {b = b''} {c = c''} pi' pcis)) with pi'
+  ... | (a ⇒ b / p , q , r) , (tblock {a} {b} {p} pis' , a'⇒b1/p1≡a++q⇒b++q/p++r) =
+    let (a'≡a++q , b1≡b++q , p≡f++r) = exeq-lfunctype a'⇒b1/p1≡a++q⇒b++q/p++r in
+    let pr' = lemma3 a' a q a'≡a++q in
+    let pr'' = subst (λ x → is :-is x ⇒ b / b ∷ p) pr' pis' in
+    ((List.drop (length a) vs , length b , [] , cis) ∷ [] , List.take (length a) vs , is) ,
+    (refl , tstate (_∷_ (({!!} , {!!}) , tframe [] (tvdrop (length a) pvs) {!!} , {!!})  pfs) (tvtake (length a) pvs) pr'')
+      where 
