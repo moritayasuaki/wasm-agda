@@ -175,19 +175,19 @@ module Typing where
 
   mutual
     data _:-i_ : insn → lfunctype → Set where
-      tconst : ∀{t v} → v :-v t → const v :-i [] ⇒ t ∷ [] / []
-      tnop : nop :-i [] ⇒ [] / []
-      tnot : not :-i bool ∷ [] ⇒ bool ∷ [] / []
-      tand : and :-i bool ∷ bool ∷ [] ⇒ bool ∷ [] / []
-      tadd : add :-i nat ∷ nat ∷ [] ⇒ nat ∷ [] / []
-      tsub : sub :-i nat ∷ nat ∷ [] ⇒ nat ∷ [] / []
-      teqz : eqz :-i nat ∷ [] ⇒ bool ∷ [] / []
-      tdup : ∀{t} → dup :-i t ∷ [] ⇒ t ∷ t ∷ [] / []
-      tdrop : ∀{t} → drop :-i t ∷ [] ⇒ [] / []
+      tconst : ∀{t v p} → v :-v t → const v :-i [] ⇒ t ∷ [] / p
+      tnop : ∀{p} → nop :-i [] ⇒ [] / p
+      tnot : ∀{p} → not :-i bool ∷ [] ⇒ bool ∷ [] / p
+      tand : ∀{p} → and :-i bool ∷ bool ∷ [] ⇒ bool ∷ [] / p
+      tadd : ∀{p} → add :-i nat ∷ nat ∷ [] ⇒ nat ∷ [] / p
+      tsub : ∀{p} → sub :-i nat ∷ nat ∷ [] ⇒ nat ∷ [] / p
+      teqz : ∀{p} → eqz :-i nat ∷ [] ⇒ bool ∷ [] / p
+      tdup : ∀{p t} → dup :-i t ∷ [] ⇒ t ∷ t ∷ [] / p
+      tdrop : ∀{p t} → drop :-i t ∷ [] ⇒ [] / p
       tblock : ∀{a b p is}
             → is :-is a ⇒ b / b ∷ p
             → block (a ⇒ b) is :-i a ⇒ b / p
-      tif-else : ∀{tis fis a b p}
+      tif-else : ∀{a b p tis fis}
             → tis :-is a ⇒ b / b ∷ p
             → fis :-is a ⇒ b / b ∷ p
             → if-else (a ⇒ b) tis fis :-i bool ∷ a ⇒ b / p
@@ -209,28 +209,23 @@ module Typing where
             → i ∷ is :-is a ⇒ c / p
 
     _:-i'_ : insn → lfunctype → Set
-    i :-i' t = ∃ {A = lfunctype × resulttype × labelstype} λ (a ⇒ b / p , c , q) → (i :-i a ⇒ b / p) × (t ≡ a ++ c ⇒ b ++ c / p ++ q)
+    i :-i' t = ∃ {A = lfunctype × resulttype} λ (a ⇒ b / p , c) → (i :-i a ⇒ b / p) × (t ≡ a ++ c ⇒ b ++ c / p)
 
-  weaken:-i : ∀{a b p i} → (c : resulttype) → (q : labelstype) → (i :-i a ⇒ b / p) → i :-i' a ++ c ⇒ b ++ c / p ++ q
-  weaken:-i {a} {b} {p} {i} c q pi = (a ⇒ b / p , c , q) , (pi , refl)
+  weaken:-i : ∀{a b p i} → (c : resulttype) → (i :-i a ⇒ b / p) → i :-i' a ++ c ⇒ b ++ c / p
+  weaken:-i {a} {b} {p} {i} c pi = (a ⇒ b / p , c) , (pi , refl)
 
   data _:-f_ : frame → lctxtype → Set where
     tframe : ∀ {a b p c d vs lis n cis}
              → lis :-is a ⇒ b / p
              → vs :-vs c
              → cis :-is b ++ c ⇒ d / p
+             → n ≡ length a
              → (vs , n , lis , cis) :-f b / a ∷ p ⇒ d / p
-
-  _:-f'_ : frame → lctxtype → Set
-  f :-f' t = ∃ {A = lctxtype × labelstype} λ (a / p ⇒ b / q , r) → (f :-f a / p ⇒ b / q) × (t ≡ a / p ++ r ⇒ b / q ++ r)
-
-  weaken:-f : ∀{a p b q f} → (r : labelstype) → (f :-f a / p ⇒ b / q) → f :-f' a / p ++ r ⇒ b / q ++ r
-  weaken:-f {a} {p} {b} {q} {f} r pf = (a / p ⇒  b / q , r) , (pf , refl)
 
   data _:-fs_ : frames → ctxtype → Set where
     []  : ∀ {a} → [] :-fs a / [] ⇒ a
     _∷_ : ∀ {f fs a b c}
-          → f :-f' (a ⇒ b)
+          → f :-f (a ⇒ b)
           → fs :-fs b ⇒ c
           → f ∷ fs :-fs a ⇒ c
 
@@ -249,22 +244,22 @@ module Typing where
   _ti++_ [] pis' = pis'
   _ti++_ (pi ∷ pis) pis' = pi ∷ (pis ti++ pis')
 
-  exeq-lfunctype : ∀{a a' b b' : resulttype} → ∀{p p' : labelstype} → a ⇒ b / p ≡ a' ⇒ b' / p' → a ≡ a' × b ≡ b' × p ≡ p' 
-  exeq-lfunctype refl = refl , refl , refl
+  eq-lfunctype : ∀{a a' b b' : resulttype} → ∀{p p' : labelstype} → a ⇒ b / p ≡ a' ⇒ b' / p' → a ≡ a' × b ≡ b' × p ≡ p' 
+  eq-lfunctype refl = refl , refl , refl
 
-  exeq-lctxtype : ∀{a a' b b' : resulttype} → ∀{p p' q q' : labelstype} → a / p ⇒ b / q ≡ a' / p' ⇒ b' / q' → a ≡ a' × p ≡ p' × b ≡ b' × q ≡ q'
-  exeq-lctxtype refl = refl , refl , refl , refl
+  eq-lctxtype : ∀{a a' b b' : resulttype} → ∀{p p' q q' : labelstype} → a / p ⇒ b / q ≡ a' / p' ⇒ b' / q' → a ≡ a' × p ≡ p' × b ≡ b' × q ≡ q'
+  eq-lctxtype refl = refl , refl , refl , refl
 
-  weaken:-is : ∀{is a b p} → (c : resulttype) → (q : labelstype) → is :-is a ⇒ b / p → is :-is a ++ c ⇒ b ++ c / p ++ q
-  weaken:-is c q [] = []
-  weaken:-is {i ∷ is} {a} {b} {p} c q (_∷_ {b = d} pi' pis) with pi'
-  ... | (a' ⇒ d' / p' , c' , q') , (pi , eq) =
-    let (a≡a'++c' , d≡d'++c' , p≡p'++q') = exeq-lfunctype eq in
-    let pi-w = weaken:-i (c' ++ c) (q' ++ q) pi |>
-               subst (λ x → i :-i' x ⇒ d' ++ c' ++ c / p' ++ q' ++ q) (lemma a a' c' c a≡a'++c') |>
-               subst (λ x → i :-i' a ++ c ⇒ x / p' ++ q' ++ q) (lemma d d' c' c d≡d'++c') |>
-               subst (λ x → i :-i' a ++ c ⇒ d ++ c / x) (lemma p p' q' q p≡p'++q') in
-    let pis-w = weaken:-is c q pis in pi-w ∷ pis-w
+  weaken:-is : ∀{is a b p} → (c : resulttype) → is :-is a ⇒ b / p → is :-is a ++ c ⇒ b ++ c / p
+  weaken:-is c [] = []
+  weaken:-is {i ∷ is} {a} {b} {p} c (_∷_ {b = d} pi' pis) with pi'
+  ... | (a' ⇒ d' / p' , c') , (pi , eq) =
+    let (a≡a'++c' , d≡d'++c' , p≡p') = eq-lfunctype eq in
+    let pi-w = weaken:-i (c' ++ c) pi |>
+               subst (λ x → i :-i' x ⇒ d' ++ c' ++ c / p') (lemma a a' c' c a≡a'++c') |>
+               subst (λ x → i :-i' a ++ c ⇒ x / p') (lemma d d' c' c d≡d'++c') |>
+               subst (λ x → i :-i' a ++ c ⇒ d ++ c / x) (sym p≡p') in
+    let pis-w = weaken:-is c pis in pi-w ∷ pis-w
 
 
   {-
@@ -296,34 +291,25 @@ module Typing where
   open Interpreter
   safety : ∀{t} → (st : state) → st :- t → ∃ λ st' → (estep st ≡ ok' st') × (st' :- t)
   safety ([] , vs , []) p = ([] , vs , []) , (refl , p)
-  safety ((vs , _ , _ , cis) ∷ fs , vs' , []) (tstate (_∷_ {a = a / p'} {b = c / p} pf' pfs) pvs' []) with pf'
-  ... | (a' / l ∷ q ⇒ c' / _ , r) , (pf  , eq) with pf
-  ...   | tframe {a = l} {b = a'} {c = b} {d = c'}  _ pvs pcis =
-    let (a≡a' , p'≡l∷q++r , c≡c' , p≡q++r) = exeq-lctxtype eq in
-    let cis:a++b⇒c/p = pcis |>
-                       subst (λ x → cis :-is x ++ b ⇒ c' / q) (sym a≡a') |>
-                       subst (λ x → cis :-is a ++ b ⇒ x / q) (sym c≡c') |>
-                       weaken:-is [] r |>
-                       subst (λ x → cis :-is (a ++ b) ++ [] ⇒ c ++ [] / x) (sym p≡q++r) |>
-                       subst (λ x → cis :-is x ⇒ c ++ [] / p) (lemma2 (a ++ b)) |>
-                       subst (λ x → cis :-is a ++ b ⇒ x / p) (lemma2 c) in 
-    (fs , vs' ++ vs , cis) , (refl , tstate pfs (pvs' tv++ pvs) cis:a++b⇒c/p)
+  safety ((vs , _ , _ , cis) ∷ fs , vs' , []) (tstate (_∷_ {a = a / p'} {b = c / p} pf pfs) pvs' []) with pf
+  ... | tframe {a = l} {b = a'} {c = b} {d = c'}  _ pvs pcis _ =
+    (fs , vs' ++ vs , cis) , (refl , tstate pfs (pvs' tv++ pvs) pcis)
   safety ([] , vs , const x ∷ is) (tstate {b = b} pfs pvs (pi' ∷ pis)) with pi'
-  ... | (_ , _ , r) , (tconst {t = t} pv , eq) =
-    let (b≡c' , a≡t∷c' , _) = exeq-lfunctype eq in
+  ... | (_ , _) , (tconst {t = t} pv , eq) =
+    let (b≡c' , a≡t∷c' , _) = eq-lfunctype eq in
     let proof = pis |>
                 subst (λ x → is :-is x ⇒ b) a≡t∷c' |>
                 subst (λ x → is :-is t ∷ x ⇒ b) (sym b≡c') in
     ([] , x ∷ vs , is) , (refl , tstate pfs (pv ∷ pvs) proof)
   safety ([] , vs , nop ∷ is) (tstate {b = b} pfs pvs (pi' ∷ pis)) with pi'
   ... | _ , (tnop , eq) =
-    let (a'≡b , a≡b , _) = exeq-lfunctype eq in
+    let (a'≡b , a≡b , _) = eq-lfunctype eq in
     let proof = pis |>
                 subst (λ x → is :-is x ⇒ b) (trans a≡b (sym a'≡b)) in
     ([] , vs , is) , (refl , tstate pfs pvs proof)
   safety ([] , v ∷ vs , dup ∷ is) (tstate {b = b} pfs (pv ∷ pvs) (pi' ∷ pis)) with pi'
   ... | _ , (tdup , eq) =
-    let (a≡b , b≡ttd , _) = exeq-lfunctype eq in
+    let (a≡b , b≡ttd , _) = eq-lfunctype eq in
     let proof = pis |>
                 subst (λ x → is :-is x ⇒ b) (trans b≡ttd (sym (cong dup'' a≡b))) in
     ([] , v ∷ v ∷ vs , is) , (refl , tstate pfs (pv ∷ pv ∷ pvs) proof)
@@ -332,18 +318,62 @@ module Typing where
           dup'' [] = []
   safety ([] , v ∷ vs , drop ∷ is) (tstate {b = b} pfs (pv ∷ pvs) (pi' ∷ pis)) with pi'
   ... | _ , (tdrop , eq) =
-    let (a≡b , b≡d , _) = exeq-lfunctype eq in
+    let (a≡b , b≡d , _) = eq-lfunctype eq in
     let proof = pis |>
-                subst (λ x → is :-is x ⇒ b) (trans b≡d (sym (cong drop'' a≡b))) in
+                subst (λ x → is :-is x ⇒ b) (trans b≡d (sym (cong (List.drop 1) a≡b))) in
     ([] , vs , is) , (refl , tstate pfs pvs proof)
-    where drop'' : resulttype → resulttype
-          drop'' (x ∷ xs) = xs
-          drop'' [] = []
-  safety ([] , vs , block (a ⇒ b) is ∷ cis) (tstate {a = a'} {b = b' / p''} {c} pfs pvs (_∷_ {a = a'} {b = b''} {c = b'} {p = p''} pi' pcis)) with pi'
-  ... | (a ⇒ b / p , q , r) , (tblock {a} {b} {p} pis' , a'⇒b''/p''≡a++q⇒b++q/p++r) =
-    let (a'≡a++q , b''≡b++q , p≡f++r) = exeq-lfunctype a'⇒b''/p''≡a++q⇒b++q/p++r in
-    let pr' = lemma3 a' a q a'≡a++q in
-    let pr'' = subst (λ x → is :-is x ⇒ b / b ∷ p) pr' pis' in
+
+  safety ([] , vs , block (a ⇒ b) is ∷ cis) (tstate {a = a'} {b = b' / p'} {c'} pfs pvs (_∷_ {a = a'} {b = b''} {c = b'} {p = p'} pi' pcis)) with pi'
+  ... | (a ⇒ b / p , c) , (tblock {a} {b} {p} pis , a'⇒b''/p'≡a++c⇒b++c/p++r) =
+    let (a'≡a++c , b''≡b++c , p'≡p) = eq-lfunctype a'⇒b''/p'≡a++c⇒b++c/p++r in
+    let pis' = subst (λ x → is :-is x ⇒ b / b ∷ p) (lemma3 a' a c a'≡a++c) pis in
+    let pis'' = subst (λ x → is :-is List.take (length a) a' ⇒ b / b ∷ x) (sym p'≡p) pis' in
+    let pcis' = subst (λ x → cis :-is x ⇒ b' / p') (b''≡b++c) pcis in
+    let pcis'' = subst (λ x → cis :-is b ++ x ⇒ b' / p') (lemma4 a' a c a'≡a++c) pcis' in
     ((List.drop (length a) vs , length b , [] , cis) ∷ [] , List.take (length a) vs , is) ,
-    (refl , tstate (((b'' / b'' ∷ [] ⇒ {!!} / {!!} , []) , tframe [] (tvdrop (length a) pvs) {!!} , {!!}) ∷ pfs) (tvtake (length a) pvs) pr'')
-      where pcis' = pcis
+    (refl , tstate ((tframe [] (tvdrop (length a) pvs) pcis'' refl) ∷ pfs) (tvtake (length a) pvs) pis'')
+
+  safety ([] , bool bb ∷ vs , if-else (a ⇒ b) is-t is-f ∷ cis) (tstate {a = bool ∷ a'} {b = b' / p'} {c'} pfs (tbool ∷ pvs) (_∷_ {a = bool ∷ a'} {b = b''} {c = b'} {p = p''} pi' pcis)) with pi'
+  ... | ((bool ∷ a) ⇒ b / p , c) , (tif-else {a} {b} {p} pis-t pis-f , eq) with bb
+  ...   | true =
+    let (bool∷a'≡bool∷a++c , b''≡b++c , p'≡p) = eq-lfunctype eq in
+    let a'≡a++c : a' ≡ a ++ c
+        a'≡a++c = cong (List.drop 1) bool∷a'≡bool∷a++c in
+    let pis-t' = subst (λ x → is-t :-is x ⇒ b / b ∷ p) (lemma3 a' a c a'≡a++c) pis-t in
+    let pis-t'' = subst (λ x → is-t :-is List.take (length a) a' ⇒ b / b ∷ x) (sym p'≡p) pis-t' in
+    let pcis' = subst (λ x → cis :-is x ⇒ b' / p') (b''≡b++c) pcis in
+    let pcis'' = subst (λ x → cis :-is b ++ x ⇒ b' / p') (lemma4 a' a c a'≡a++c) pcis' in
+    ((List.drop (length a) vs , length b , [] , cis) ∷ [] , List.take (length a) vs , is-t) ,
+    (refl , tstate ((tframe [] (tvdrop (length a) pvs) pcis'' refl) ∷ pfs) (tvtake (length a) pvs) pis-t'')
+  ...   | false =
+    let (bool∷a'≡bool∷a++c , b''≡b++c , p'≡p) = eq-lfunctype eq in
+    let a'≡a++c : a' ≡ a ++ c
+        a'≡a++c = cong (List.drop 1) bool∷a'≡bool∷a++c in
+    let pis-f' = subst (λ x → is-f :-is x ⇒ b / b ∷ p) (lemma3 a' a c a'≡a++c) pis-f in
+    let pis-f'' = subst (λ x → is-f :-is List.take (length a) a' ⇒ b / b ∷ x) (sym p'≡p) pis-f' in
+    let pcis' = subst (λ x → cis :-is x ⇒ b' / p') (b''≡b++c) pcis in
+    let pcis'' = subst (λ x → cis :-is b ++ x ⇒ b' / p') (lemma4 a' a c a'≡a++c) pcis' in
+    ((List.drop (length a) vs , length b , [] , cis) ∷ [] , List.take (length a) vs , is-f) ,
+    (refl , tstate ((tframe [] (tvdrop (length a) pvs) pcis'' refl) ∷ pfs) (tvtake (length a) pvs) pis-f'')
+
+  safety ([] , vs , loop (a ⇒ b) is ∷ cis) (tstate {a = a'} {b = b' / p'} {c'} pfs pvs (_∷_ {a = a'} {b = b''} {c = b'} {p = p'} pi' pcis)) with pi'
+  ... | (a ⇒ b / p , c) , (tloop {a} {b} {p} pis' , eq) =
+    let (a'≡a++c , b'≡b++c , p≡p') = eq-lfunctype eq in
+    let pis'' = subst (λ x → is :-is x ⇒ b / a ∷ p) (lemma3 a' a c a'≡a++c) pis' in
+    let pis''' = subst (λ x → is :-is List.take (length a) a' ⇒ x / a ∷ p) (sym (++-identityʳ b)) pis'' in
+    let pis'''' = subst (λ x → is :-is List.take (length a) a' ⇒ b ++ [] / x ∷ p) (sym (++-identityʳ a)) pis''' in
+    let pcis' = subst (λ x → cis :-is x ⇒ b' / p') (b'≡b++c) pcis in
+    let pcis'' = subst (λ x → cis :-is b ++ x ⇒ b' / p') (lemma4 a' a c a'≡a++c) pcis' in
+    let pcis''' = subst (λ x → cis :-is b ++ List.drop (length a) a' ⇒ b' / x) p≡p' pcis'' in
+    let pcis'''' = subst (λ x → cis :-is x ++ List.drop (length a) a' ⇒ b' / p) (sym (++-identityʳ b)) pcis''' in
+    let pfs' = subst (λ x → [] :-fs b' / x ⇒ c') p≡p' pfs in
+    ((List.drop (length a) vs , length a , loop (a ⇒ b) is ∷ [] , cis) ∷ [] , List.take (length a) vs , is) ,
+    (refl , tstate ((tframe (weaken:-i [] (tloop pis') ∷ []) (tvdrop (length a) pvs) pcis'''' (cong length (sym (++-identityʳ a)))) ∷ pfs') (tvtake (length a) pvs) pis'''')
+
+  safety ((vs' , m , lis , cis) ∷ fs , vs , br 0 ∷ is) (tstate {a = a'} {b = b' / a'' ∷ p'} {c'} ((tframe {c = c''} plis pvs' pcis meq) ∷ pfs) pvs (_∷_ {a = a'} {b = b''} {c = b'} {p = a'' ∷ p'} pi' pis)) with pi'
+  ... | (a ⇒ b / p , c) , (tbrn n fn p1 p2 , eq) =
+    let (g , h , q ) = eq-lfunctype eq in
+    let t = cong (λ x → lis :-is List.take x a' ⇒ b' / p') meq in
+    let s = subst (λ x → a ≡ lookup x {!!}) q p2 in
+    (fs , List.take m vs ++ vs' , lis ++ cis) ,
+    (refl , tstate pfs (tvtake m pvs tv++ pvs') {!!}) -- ((weaken:-is c'' plis) ti++ pcis))
