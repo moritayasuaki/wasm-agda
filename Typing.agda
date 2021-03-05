@@ -374,6 +374,7 @@ module Typing where
   ... | (a ⇒ b / p , c) , (tbrn n fn p1 p2 , eq) =
     let (g , h , q ) = eq-lfunctype eq in
     let t = cong (λ x → lis :-is List.take x a' ⇒ b' / p') meq in
-    let s = subst (λ x → a ≡ lookup x {!!}) q p2 in
+    let s = cong (λ x → a ≡ lookup x {!!}) q in
+    let s' = subst (λ x → a ≡ lookup x {!!}) (sym q) p2 in
     (fs , List.take m vs ++ vs' , lis ++ cis) ,
     (refl , tstate pfs (tvtake m pvs tv++ pvs') {!!}) -- ((weaken:-is c'' plis) ti++ pcis))
