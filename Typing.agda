@@ -20,6 +20,7 @@ import Data.String as String
 import Data.Maybe as Maybe
 import Category.Monad.State using (IStateT ; StateTIMonad)
 import Category.Monad.Continuation using (DContT ; DContIMonad)
+open import Data.Fin.Properties
 
 infix 4.9 _/_ 
 record slash (X : Set) (Y : Set): Set where
@@ -34,37 +35,21 @@ module _ where
   open import Data.List.Properties
   open import Relation.Binary.PropositionalEquality
   lemma : ∀ {X : Set} → (ab a b c : List X) → (ab ≡ a ++ b) → a ++ b ++ c ≡ (ab ++ c)
-  lemma ab a b c ab=a++b = sym proof
-    where
-      ab++c=[a++b]++c = cong (List._++ c) ab=a++b
-      [a++b]++c=a++b++c = ++-assoc a b c
-      proof = trans ab++c=[a++b]++c [a++b]++c=a++b++c 
-  lemma2 : ∀ {X : Set} → (a : List X) → a ++ [] ≡ a
-  lemma2 a = ++-identityʳ a
+  lemma .(a ++ b) a b c refl = sym (++-assoc a b c)
 
   lemma3' : ∀ {X : Set} → (b c : List X) → b ≡ take (length b) (b ++ c)
   lemma3' [] ys = refl
-  lemma3' (x ∷ xs) ys = let p = cong (x ∷_) (lemma3' xs ys)
-                         in trans p (t2 (length xs))
-                         where t2 : ∀ n → x ∷ take n (xs ++ ys) ≡ take (suc n) (x ∷ xs ++ ys)
-                               t2 n = refl
+  lemma3' (x ∷ xs) ys = cong (x ∷_ ) (lemma3' xs ys)
 
   lemma3 : ∀ {X : Set} → (a b c : List X) → a ≡ b ++ c → b ≡ take (length b) a
-  lemma3 a b c p = let p' = cong (λ x → take (length b) x) p in
-                   let d = (sym (lemma3' b c)) in
-                   let e = trans p' d in sym e
+  lemma3 .(b ++ c) b c refl = lemma3' b c
 
   lemma4' : ∀ {X : Set} → (b c : List X) → c ≡ drop (length b) (b ++ c)
   lemma4' [] ys = refl
-  lemma4' (x ∷ xs) ys = let p = lemma4' xs ys
-                         in trans p (t2 (length xs))
-                         where t2 : ∀ n → drop n (xs ++ ys) ≡ drop (suc n) (x ∷ xs ++ ys)
-                               t2 n = refl
+  lemma4' (x ∷ xs) ys = lemma4' xs ys
 
   lemma4 : ∀ {X : Set} → (a b c : List X) → a ≡ b ++ c → c ≡ drop (length b) a
-  lemma4 a b c p = let p' = cong (λ x → drop (length b) x) p in
-                   let d = (sym (lemma4' b c)) in
-                   let e = trans p' d in sym e
+  lemma4 .(b ++ c) b c refl = lemma4' b c
 
 module Typing where
   open String using (String)
@@ -93,74 +78,13 @@ module Typing where
   lctxtype = arrow lresulttype lresulttype
   ctxtype = arrow lresulttype resulttype
 
-  {-
-  eqvt : valtype → valtype → Bool
-  eqvt bool bool = true
-  eqvt nat nat = true
-  eqvt unit unit = true
-  eqvt _ _ = false
-
-  eqrt : resulttype → resulttype → Bool
-  eqrt (x ∷ xs) (y ∷ ys) = if eqvt x y then eqrt xs ys else false
-  eqrt [] [] = true
-  eqrt _ _ = false
-
-
-  diff : ∀ {X : Set} → (X → X → Bool) → List X → List X → List X × List X
-  diff eq (x ∷ xs) (y ∷ ys) = if eq x y then diff eq xs ys else (x ∷ xs , y ∷ ys)
-  diff eq xs ys = (xs , ys)
-
-  max : ∀ {X : Set} → (X → X → Bool) → List X → List X → Maybe (List X)
-  max eq xs ys with diff eq xs ys
-  ...             | (rs , []) = just xs
-  ...             | ([] , rs) = just ys
-  ...             | _ = nothing
-
-  eqls : ∀ {X : Set} → (X → X → Bool) → List X → List X → Bool
-  eqls eq xs ys with diff eq xs ys
-  ... | ([] , []) = true
-  ... | _ = false
-  
-  module _ where
-    open import Data.Maybe
-
-    gtef : ∀ {X : Set} → (X → X → Bool) → List X × List X → List X × List X → Maybe Bool
-    gtef eq (xs , ys) (xs' , ys') with (diff eq xs xs' , diff eq ys ys')
-    ...  | (rxs , []) , (rys , []) = if eqls eq rxs rys then just true else nothing
-    ...  | ([] , rxs') , ([] , rys') = if eqls eq rxs' rys' then just false else nothing
-    ...  | _ = nothing
-
-    maxf : ∀ {X : Set} → (X → X → Bool) → List X × List X → List X × List X → Maybe (List X × List X)
-    maxf eq w z with gtef eq w z
-    ...  | just true = just w
-    ...  | just false = just z
-    ...  | _ = nothing
-
-    composef : ∀ {X : Set} → (X → X → Bool) → List X × List X → List X × List X → Maybe (List X × List X)
-    composef eq (a , b) (c , d) with diff eq b c
-    ... | (b' , []) = just (a , d ++ b')
-    ... | ([] , c') = just (a ++ c' , [])
-    ... | _ = nothing
-
-    tcomp : lfunctype → lfunctype → Maybe lfunctype
-    tcomp (a ⇒ b / p) (c ⇒ d / q) = do
-      (a' , d') ← composef eqvt (a , b) (c , d)
-      q' ← max eqrt p q
-      just $ a' ⇒ d' / q'
-
-    tmax : lfunctype → lfunctype → Maybe lfunctype
-    tmax (a ⇒ b / p) (a' ⇒ b' / p') = do
-      (a'' , b'') ← maxf eqvt (a , b) (a' , b')
-      p'' ← max eqrt p p'
-      just $ a'' ⇒ b'' / p''
-  -} 
+ 
   infix 2 _:-v_
   infix 2 _:-vs_
   infix 2 _:-i_
   infix 2 _:-i'_
   infix 2 _:-is_
   infix 2 _:-f_
-  infix 2 _:-f'_
   infix 2 _:-fs_
   infix 2 _:-_
 
@@ -261,7 +185,6 @@ module Typing where
                subst (λ x → i :-i' a ++ c ⇒ d ++ c / x) (sym p≡p') in
     let pis-w = weaken:-is c pis in pi-w ∷ pis-w
 
-
   {-
   _tf++_ : ∀ {fs fs' a b c} → (fs :-fs a ⇒ b) → (fs' :-fs b ⇒ c) → fs ++ fs' :-fs a ⇒ c
   _tf++_ [] pfs' = pfs'
@@ -294,21 +217,49 @@ module Typing where
   safety ((vs , _ , _ , cis) ∷ fs , vs' , []) (tstate (_∷_ {a = a / p'} {b = c / p} pf pfs) pvs' []) with pf
   ... | tframe {a = l} {b = a'} {c = b} {d = c'}  _ pvs pcis _ =
     (fs , vs' ++ vs , cis) , (refl , tstate pfs (pvs' tv++ pvs) pcis)
-  safety ([] , vs , const x ∷ is) (tstate {b = b} pfs pvs (pi' ∷ pis)) with pi'
-  ... | (_ , _) , (tconst {t = t} pv , eq) =
+  safety (fs' , vs , const x ∷ is) (tstate {b = b} pfs pvs ((_ , tconst {t = t} pv , eq) ∷ pis)) with fs'
+  ... | [] =
     let (b≡c' , a≡t∷c' , _) = eq-lfunctype eq in
     let proof = pis |>
                 subst (λ x → is :-is x ⇒ b) a≡t∷c' |>
                 subst (λ x → is :-is t ∷ x ⇒ b) (sym b≡c') in
     ([] , x ∷ vs , is) , (refl , tstate pfs (pv ∷ pvs) proof)
+  ... | f ∷ fs =
+    let (b≡c' , a≡t∷c' , _) = eq-lfunctype eq in
+    let proof = pis |>
+                subst (λ x → is :-is x ⇒ b) a≡t∷c' |>
+                subst (λ x → is :-is t ∷ x ⇒ b) (sym b≡c') in
+    (f ∷ fs , x ∷ vs , is) , (refl , tstate pfs (pv ∷ pvs) proof)
+
   safety ([] , vs , nop ∷ is) (tstate {b = b} pfs pvs (pi' ∷ pis)) with pi'
   ... | _ , (tnop , eq) =
     let (a'≡b , a≡b , _) = eq-lfunctype eq in
     let proof = pis |>
                 subst (λ x → is :-is x ⇒ b) (trans a≡b (sym a'≡b)) in
     ([] , vs , is) , (refl , tstate pfs pvs proof)
-  safety ([] , v ∷ vs , dup ∷ is) (tstate {b = b} pfs (pv ∷ pvs) (pi' ∷ pis)) with pi'
-  ... | _ , (tdup , eq) =
+
+  safety (fs' , bool v ∷ vs , not ∷ is) (tstate {b = b} pfs (tbool ∷ pvs) ((_ , tnot , refl) ∷ pis)) with fs'
+  ... | [] = ([] , bool (Bool.not v) ∷ vs , is) , (refl , tstate pfs (tbool ∷ pvs) pis)
+  ... | f ∷ fs = (f ∷ fs , bool (Bool.not v) ∷ vs , is) , (refl , tstate pfs (tbool ∷ pvs) pis)
+
+  safety (fs' , bool v ∷ bool v' ∷ vs , and ∷ is) (tstate {b = b} pfs (tbool ∷ tbool ∷ pvs) ((_ , tand , refl) ∷ pis)) with fs'
+  ... | [] = ([] , bool (v Bool.∧ v') ∷ vs , is) , (refl , tstate pfs (tbool ∷ pvs) pis)
+  ... | f ∷ fs = (f ∷ fs , bool (v Bool.∧ v') ∷ vs , is) , (refl , tstate pfs (tbool ∷ pvs) pis)
+
+  safety (fs' , nat n ∷ nat m ∷ vs , add ∷ is) (tstate pfs (tnat ∷ (tnat ∷ pvs)) ((_ , tadd , refl) ∷ pis)) with fs'
+  ... | [] = ([] , nat (n Nat.+ m) ∷ vs , is) , (refl , tstate pfs (tnat ∷ pvs) pis)
+  ... | f ∷ fs = (f ∷ fs , nat (n Nat.+ m) ∷ vs , is) , (refl , tstate pfs (tnat ∷ pvs) pis)
+
+  safety (fs' , nat n ∷ nat m ∷ vs , sub ∷ is) (tstate pfs (tnat ∷ (tnat ∷ pvs)) ((_ , tsub , refl) ∷ pis)) with fs'
+  ... | [] = ([] , nat (n Nat.∸ m) ∷ vs , is) , (refl , tstate pfs (tnat ∷ pvs) pis)
+  ... | f ∷ fs = (f ∷ fs , nat (n Nat.∸ m) ∷ vs , is) , (refl , tstate pfs (tnat ∷ pvs) pis)
+
+  safety (fs' , nat n ∷ vs , eqz ∷ is) (tstate pfs (tnat ∷ pvs) ((_ , teqz , refl) ∷ pis)) with fs'
+  ... | [] = ([] , bool (feqz n) ∷ vs , is) , (refl , tstate pfs (tbool ∷ pvs) pis)
+  ... | f ∷ fs = (f ∷ fs , bool (feqz n) ∷ vs , is) , (refl , tstate pfs (tbool ∷ pvs) pis)
+
+  safety (fs' , v ∷ vs , dup ∷ is) (tstate {b = b} pfs (pv ∷ pvs) ((_ , (tdup , eq)) ∷ pis)) with fs'
+  ... | [] =
     let (a≡b , b≡ttd , _) = eq-lfunctype eq in
     let proof = pis |>
                 subst (λ x → is :-is x ⇒ b) (trans b≡ttd (sym (cong dup'' a≡b))) in
@@ -316,6 +267,15 @@ module Typing where
     where dup'' : resulttype → resulttype
           dup'' (x ∷ xs) = x ∷ x ∷ xs
           dup'' [] = []
+  ... | f ∷ fs =
+    let (a≡b , b≡ttd , _) = eq-lfunctype eq in
+    let proof = pis |>
+                subst (λ x → is :-is x ⇒ b) (trans b≡ttd (sym (cong dup'' a≡b))) in
+    (f ∷ fs , v ∷ v ∷ vs , is) , (refl , tstate pfs (pv ∷ pv ∷ pvs) proof)
+    where dup'' : resulttype → resulttype
+          dup'' (x ∷ xs) = x ∷ x ∷ xs
+          dup'' [] = []
+
   safety ([] , v ∷ vs , drop ∷ is) (tstate {b = b} pfs (pv ∷ pvs) (pi' ∷ pis)) with pi'
   ... | _ , (tdrop , eq) =
     let (a≡b , b≡d , _) = eq-lfunctype eq in
@@ -370,11 +330,20 @@ module Typing where
     ((List.drop (length a) vs , length a , loop (a ⇒ b) is ∷ [] , cis) ∷ [] , List.take (length a) vs , is) ,
     (refl , tstate ((tframe (weaken:-i [] (tloop pis') ∷ []) (tvdrop (length a) pvs) pcis'''' (cong length (sym (++-identityʳ a)))) ∷ pfs') (tvtake (length a) pvs) pis'''')
 
-  safety ((vs' , m , lis , cis) ∷ fs , vs , br 0 ∷ is) (tstate {a = a'} {b = b' / a'' ∷ p'} {c'} ((tframe {c = c''} plis pvs' pcis meq) ∷ pfs) pvs (_∷_ {a = a'} {b = b''} {c = b'} {p = a'' ∷ p'} pi' pis)) with pi'
-  ... | (a ⇒ b / p , c) , (tbrn n fn p1 p2 , eq) =
-    let (g , h , q ) = eq-lfunctype eq in
+  safety ((vs' , m , lis , cis) ∷ fs , vs , br 0 ∷ is) (tstate {a = a'} {b = b' / a'' ∷ p'} {c'} ((tframe {c = c''} plis pvs' pcis refl) ∷ pfs) pvs (_∷_ {a = a'} {b = b''} {c = b'} {p = a'' ∷ p'} pi' pis)) with pi'
+  ... | (.a'' ⇒ b / .(a'' ∷ p') , c) , tbrn .0 zero refl refl , refl =
+    let plis' = subst (λ x → lis :-is x ⇒ b' / p') (lemma3' a'' c) plis in
+    (fs , List.take m vs ++ vs' , lis ++ cis) , (refl , tstate pfs (tvtake m pvs tv++ pvs') ((weaken:-is c'' plis') ti++ pcis))
+
+  safety ((_ , _ , _ , _) ∷ fs , vs , br (Nat.suc n) ∷ is) (tstate {a = a'} {b = b' / a'' ∷ p'} {c'} (tframe {c = c''} _ _ _ _ ∷ pfs) pvs (pi' ∷ pis)) with pi'
+  ... | a , b = {!!}
+
+{-    let (g , h , q ) = eq-lfunctype eq in
     let t = cong (λ x → lis :-is List.take x a' ⇒ b' / p') meq in
-    let s = cong (λ x → a ≡ lookup x {!!}) q in
-    let s' = subst (λ x → a ≡ lookup x {!!}) (sym q) p2 in
+    let leneq : length p ≡ (Nat.suc (length p'))
+        leneq = cong length (sym q) in
+    let fn-zero = toℕ-injective {i = fn} {j = ?} refl in
+    let s' = subst (λ x → a ≡ lookup x fn) (sym q) p2 in
     (fs , List.take m vs ++ vs' , lis ++ cis) ,
     (refl , tstate pfs (tvtake m pvs tv++ pvs') {!!}) -- ((weaken:-is c'' plis) ti++ pcis))
+-}
