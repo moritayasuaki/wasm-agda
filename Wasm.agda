@@ -68,6 +68,7 @@ module Syntax where
     open List hiding (and ; drop)
     open Monad.IList hiding (drop)
     open Monad.IExc
+    open Vec using (Vec ; _∷_ ; [])
 
     data valtype : Set where
       bool : valtype
@@ -143,9 +144,11 @@ module Syntax where
     frame : Set
     frame = vals × Nat.ℕ × insns × insns
 
-    frames = List frame
+    frames : ℕ → Set
+    frames n = Vec frame n
 
-    state = frames × vals × insns
+    state : ℕ → Set
+    state n = frames n × vals × insns
 
     non-ctrl-insn : insn → Bool
     non-ctrl-insn nop = true
@@ -211,10 +214,10 @@ module Syntax where
     show-frame : frame → String
     show-frame (vs , a , l , is) = show-vals vs ++ "ℓ" ++ NS.show a ++ "{" ++ show-insns l ++ "}" ++ "*" ++ show-insns is
 
-    show-frames : frames → String
-    show-frames fs = "[" ++ show-list-with-sep show-frame " " fs ++ "]"
+    show-frames : {n : Nat.ℕ} → frames n → String
+    show-frames fs = "[" ++ show-list-with-sep show-frame " " (Vec.toList fs) ++ "]"
 
-    show-state : state → String
+    show-state : {n : Nat.ℕ} → state n → String
     show-state (fs , vs , is) = "(" ++ show-frames fs ++ ", " ++ show-vals vs ++ ", " ++ show-insns is ++ ")"
 
 module Equality where
@@ -244,9 +247,11 @@ module InterpreterCore where
   open String using (String)
   open Category.Monad
   open Category.Monad.State
+  open Category.Monad.Indexed
   open Product
   open Unit
   open Function
+  open Nat
   data result (S : Set) : Set where
     ok : S → result S
     error : String → result S
@@ -263,16 +268,16 @@ module InterpreterCore where
 
   open Category.Monad.State
 
-  state-machine : Set → Set → Set
-  state-machine S = IStateT (λ _ → S) result tt tt
+  state-machine : (ℕ → Set) → (ℕ → ℕ → Set → Set)
+  state-machine S n m = IStateT S result n m
 
-  state-machine-result : Set → Set → Set
-  state-machine-result S X = result (X × S)
+  state-machine-result : (ℕ → Set) → Set → (ℕ → Set)
+  state-machine-result S X n = result (X × (S n))
 
-  state-machine-monad : ∀ (S : Set) → RawMonad (state-machine S)
-  state-machine-monad S = StateTIMonad (λ _ → S) resultMonad
+  state-machine-monad : (S : ℕ → Set) → RawIMonad (state-machine S)
+  state-machine-monad S = StateTIMonad S resultMonad
 
-  lift-result : ∀{S X} → result X → state-machine S X
+  lift-result : ∀{S X n} → result X → state-machine S n n X
   lift-result x s = do
     v ← x
     ok (v , s)
@@ -280,13 +285,13 @@ module InterpreterCore where
 
   pattern ok' a = ok (tt , a)
 
-  record substate (S : Set) (S' : Set) : Set where
+  record substate (S : ℕ → Set) (S' : ℕ → Set) : Set where
     field
-      view : S → S'
-      update : S → S' → S
-      eq : ∀(x : S) → update x (view x) PropositionalEquality.≡ x
+      view : ∀{n} → S n → S' n
+      update : ∀{n} → S n → S' n → S n
+      eq : ∀{n} → ∀(x : S n) → update x (view x) PropositionalEquality.≡ x
 
-  upgrade : {S' S X : Set} → (substate S S') → state-machine S' X → state-machine S X
+  upgrade : {X : Set} → ∀{S S' n} → (substate S S') → state-machine S' n n X → state-machine S n n X
   upgrade {S'} r ms' s = do
     x , t' ← ms' (view s)
     return $ x , update s t'
@@ -302,10 +307,12 @@ module Interpreter where
   open String using (String)
   open Syntax 
   open Category.Monad
+  open Category.Monad.Indexed
   open Sum
   open Product
   open Unit
   open List hiding (and)
+  open Vec using (Vec ; _∷_ ; [])
   open Nat
   open Bool hiding (not)
   open Category.Monad.State
@@ -319,21 +326,21 @@ module Interpreter where
   interp-valtype unit = ⊤
 
   module _ where
-    non-framed = state-machine (vals × insns)
-    non-framed-result = state-machine-result (vals × insns)
+    non-framed = state-machine (λ _ → vals × insns)
+    non-framed-result = state-machine-result (λ _ → vals × insns)
     result-non-framed = result (vals × insns)
 
-    module non-framed-M = RawMonad (state-machine-monad (vals × insns))
+    module non-framed-M = RawIMonad (state-machine-monad (λ _ → vals × insns))
     open non-framed-M
 
-    push : val → non-framed ⊤
+    push : ∀{n} → val → non-framed n n ⊤
     push v (vs , is) = ok' ((v ∷ vs) , is) 
 
-    pop : non-framed val
+    pop : ∀{n} → non-framed n n val
     pop (v ∷ vs , is) = ok (v , vs , is)
     pop _ = error "value stack underflow"
   
-    chkval : (t : valtype) → val → non-framed (interp-valtype t)
+    chkval : ∀{n} → (t : valtype) → val → non-framed n n (interp-valtype t)
     chkval bool (bool b) = return b
     chkval nat (nat n) = return n
     chkval unit (unit tt) = return tt
@@ -343,19 +350,19 @@ module Interpreter where
             actual (nat _) = nat
             actual (unit _) = unit
   
-    popchk : (t : valtype) → non-framed (interp-valtype t)
+    popchk : ∀{n} → (t : valtype) → non-framed n n (interp-valtype t)
     popchk t = pop >>= chkval t
   
-    fetch : non-framed insn
+    fetch : ∀{n} → non-framed n n insn
     fetch (vs , (i ∷ is)) = ok (i , vs , is)
     fetch _ = error "no instuction to fetch"
 
   
-    emit : insn → non-framed ⊤
+    emit : ∀{n} → insn → non-framed n n ⊤
     emit i (vs , is) = ok' (vs , i ∷ is)
   
     module NonFramed where
-      einsn : insn → non-framed ⊤
+      einsn : ∀{n} → insn → non-framed n n ⊤
       einsn (const v) = do push v
       einsn nop = return tt
       einsn and = do
@@ -385,47 +392,43 @@ module Interpreter where
         return tt
       einsn _ _ = error "illegal instruction"
   
-      eistep : non-framed ⊤
+      eistep : ∀{n} → non-framed n n ⊤
       eistep s@(v , []) = ok' s
       eistep s@(v , i ∷ is) = (fetch >>= einsn) s
 
 
   module _ where
-    framed = state-machine (frames × vals × insns)
-    framed-result = state-machine-result (frames × vals × insns)
-    module framed-M = RawMonad (state-machine-monad (frames × vals × insns))
+    framed = state-machine (λ n → frames n × vals × insns)
+    framed-result = state-machine-result (λ n → frames n × vals × insns)
+
+    module framed-M = RawIMonad (state-machine-monad (λ n → frames n × vals × insns))
     open framed-M 
 
-    lift : ∀{X : Set} → non-framed X → framed X
-    lift {X} nf (fs , vs , is) = f (nf (vs , is))
-      where f : non-framed-result X → framed-result X
+    lift : ∀{X : Set} → ∀ {n} → non-framed n n X → framed n n X
+    lift {X} {n} nf (fs , vs , is) = f (nf (vs , is))
+      where f : non-framed-result X n → framed-result X n
             f (ok (x , s)) = ok (x , fs , s)
             f (error e) = (error e)
 
-    prepend : insns → framed ⊤
+    prepend : ∀{n} → insns → framed n n ⊤
     prepend is' (fs , vs , is) = ok' (fs , vs , is' ++ is)
 
-    append : vals → framed ⊤
+    append : ∀{n} → vals → framed n n ⊤
     append vs' (fs , vs , is) = ok' (fs , vs' ++ vs , is)
 
-    split : ℕ → framed vals
+    split : ∀{n} → ℕ → framed n n vals
     split n (fs , vs , is) = ok (take n vs , fs , List.drop n vs , is)
   
-    vswap : vals → framed vals
+    vswap : ∀{n} → vals → framed n n vals
     vswap vs (fs , vs' , is) = ok (vs' , fs , vs , is)
 
-    enter : frame → framed ⊤
+    enter : ∀{n} → frame → framed n (suc n) ⊤
     enter (vs' , a , l , is') (fs , vs , is) = ok' ((vs , a , l , is) ∷ fs , vs' , is')
   
-    lookup-label-nargs : ℕ → framed ℕ
-    lookup-label-nargs l st@(fs , _ , _) with List.head (List.drop l fs)
-    ...                               | Maybe.just (_ , a , _ , _)  = ok (a , st)
-    ...                               | Maybe.nothing = error "jump terget does not exist"
+    leave : ∀{n} → framed (suc n) n frame
+    leave (_∷_ {Nat.suc n} (vs , a , l , is) fs , vs' , is') = ok ((vs' , a , l , is') , fs , vs , is)
   
-    leave : framed frame
-    leave ((vs , a , l , is) ∷ fs , vs' , is') = ok ((vs' , a , l , is') , fs , vs , is)
-    leave _ = error "control stack underflow"
-  
+{-
     br-helper : ℕ → framed ⊤
     br-helper n (fs , vs , is) = go' (List.drop n fs)
         where go' : frames → state-machine-result (frames × vals × insns) ⊤
@@ -856,3 +859,4 @@ module Example2 where
             ...                 | s' with estep' 1024 s'
             ...                         | ok (tt , s) = concat-with " ⟼ " $ show-state' s' ∷ show-state' s ∷ []
             ...                         | error e = concat-with " ⟼ " $ show-state' s' ∷ e ∷ []
+-}
