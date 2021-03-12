@@ -3,7 +3,6 @@ module Wasm where
 import Category.Monad.Indexed
 import Category.Monad
 import Category.Applicative.Indexed
-import Data.List as List
 import Function
 import Level
 import Data.Fin as Fin
@@ -14,6 +13,8 @@ import Data.Sum as Sum
 
 
 import Data.Nat as Nat
+import Data.Vec as Vec
+import Data.List as List
 import Data.Bool as Bool
 import Data.Empty as Empty
 import Data.String as String
@@ -426,6 +427,12 @@ module Interpreter where
     leave _ = error "control stack underflow"
   
     br-helper : ℕ → framed ⊤
+    br-helper n (fs , vs , is) = go' (List.drop n fs)
+        where go' : frames → state-machine-result (frames × vals × insns) ⊤
+              go' ((vs' , m , lis , cis) ∷ fs') = ok' (fs' , (take m vs) ++ vs' , lis ++ cis)
+              go' [] = error "branch to outside"
+
+    {-
     br-helper zero = do
       (vs , n , lcont , _) ← leave
       prepend lcont
@@ -434,6 +441,7 @@ module Interpreter where
       (vs , _ , _ , _) ← leave
       vswap vs
       br-helper m
+    -}
   
     einsn : insn → framed ⊤
     einsn (block (a ⇒ b) is) = do
@@ -466,14 +474,15 @@ module Interpreter where
     eifstep = lift fetch >>= einsn
  
     estep : framed ⊤
-    estep st@([] , vs , []) = ok' ([] , vs , [])
-    estep st@(fs , vs , i ∷ is) with non-ctrl-insn i
-    ...                         | true = (lift NonFramed.eistep) st
-    ...                         | false = eifstep st
-    estep st@(f ∷ fs , vs , []) = eend st
+    estep ([] , vs , []) = ok' ([] , vs , [])
+    estep (fs , vs , i ∷ is) with non-ctrl-insn i
+    ...                         | true = (lift NonFramed.eistep) (fs , vs , i ∷ is)
+    ...                         | false = eifstep (fs , vs , i ∷ is)
+    estep (f ∷ fs , vs , []) = eend (f ∷ fs , vs , [])
   
     estepn : ℕ → framed ⊤
-    estepn zero = return tt
+    estepn zero ([] , vs , []) = ok' ([] , vs , [])
+    estepn zero _ = error "timeout"
     estepn (suc n) = estep >> estepn n
 
 module Example where
@@ -499,7 +508,7 @@ module Example where
   ex8 = ([] , nat 1 ∷ [] , block (nat ∷ [] ⇒ bool ∷ []) (const (nat 1) ∷ block (nat ∷ [] ⇒ []) (const (bool true) ∷ br 1 ∷ []) ∷ []) ∷ [])
 
   show-result : result (⊤ × state) → String
-  show-result (ok' st) = concat-with-colon (show-state st ∷ "timeout" ∷ [])
+  show-result (ok' st) = concat-with-colon (show-state st ∷ [])
   show-result (error emesg) = concat-with-colon ("error" ∷ emesg ∷ [])
 
   show-eval : state → String
