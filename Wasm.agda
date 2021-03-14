@@ -150,6 +150,7 @@ module Syntax where
     state : ℕ → Set
     state n = frames n × vals × insns
 
+{-
     non-ctrl-insn : insn → Bool
     non-ctrl-insn nop = true
     non-ctrl-insn and = true
@@ -159,8 +160,9 @@ module Syntax where
     non-ctrl-insn eqz = true
     non-ctrl-insn dup = true
     non-ctrl-insn drop = true
+    non-ctrl-insn (br _) = false
     non-ctrl-insn _ = false
-
+-}
   module _ where
     open String
     open List hiding (_++_)
@@ -430,10 +432,10 @@ module Interpreter where
   
 {-
     br-helper : ℕ → framed ⊤
-    br-helper n (fs , vs , is) = go' (List.drop n fs)
-        where go' : frames → state-machine-result (frames × vals × insns) ⊤
-              go' ((vs' , m , lis , cis) ∷ fs') = ok' (fs' , (take m vs) ++ vs' , lis ++ cis)
-              go' [] = error "branch to outside"
+    br-helper n (fs , vs , _) with List.drop n fs
+    ... | [] = error "branch to outside" 
+    ... | (vs' , m , lis , cis) ∷ fs' = ok' (fs' , (take m vs) ++ vs' , lis ++ cis)
+
 
     {-
     br-helper zero = do
@@ -477,11 +479,27 @@ module Interpreter where
     eifstep = lift fetch >>= einsn
  
     estep : framed ⊤
+    estep (fs , vs , br n ∷ is) = eifstep (fs , vs , br n ∷ is)
+    estep (fs , vs , nop ∷ is) = (lift NonFramed.eistep) (fs , vs , nop ∷ is)
+    estep (fs , vs , const v ∷ is) = (lift NonFramed.eistep) (fs , vs , insn.const v ∷ is)
+    estep (fs , vs , and ∷ is) = (lift NonFramed.eistep) (fs , vs , and ∷ is)
+    estep (fs , vs , not ∷ is) = (lift NonFramed.eistep) (fs , vs , not ∷ is)
+    estep (fs , vs , add ∷ is) = (lift NonFramed.eistep) (fs , vs , add ∷ is)
+    estep (fs , vs , sub ∷ is) = (lift NonFramed.eistep) (fs , vs , sub ∷ is)
+    estep (fs , vs , eqz ∷ is) = (lift NonFramed.eistep) (fs , vs , eqz ∷ is)
+    estep (fs , vs , dup ∷ is) = (lift NonFramed.eistep) (fs , vs , dup ∷ is)
+    estep (fs , vs , drop ∷ is) = (lift NonFramed.eistep) (fs , vs , insn.drop ∷ is)
+    estep (fs , vs , block t is' ∷ is) = eifstep (fs , vs , block t is' ∷ is)
+    estep (fs , vs , if-else t is' is'' ∷ is) = eifstep (fs , vs , if-else t is' is'' ∷ is)
+    estep (fs , vs , loop t is' ∷ is) = eifstep (fs , vs , loop t is' ∷ is)
+    estep (fs , vs , br-if n ∷ is) = eifstep (fs , vs , br-if n ∷ is)
     estep ([] , vs , []) = ok' ([] , vs , [])
-    estep (fs , vs , i ∷ is) with non-ctrl-insn i
-    ...                         | true = (lift NonFramed.eistep) (fs , vs , i ∷ is)
-    ...                         | false = eifstep (fs , vs , i ∷ is)
     estep (f ∷ fs , vs , []) = eend (f ∷ fs , vs , [])
+    -- pattern matching for `fs` must be bottom of the cases, and you can not place it to the begening of the function.
+    -- Otherwise agda requires frames to destruct in any cases and `estep (fs , vs , br n)` won't be able to normalize `eifstep ...` in the proof of safety.
+    -- Possively I should avoid using product type for arguments of `estep`, because telling that the type of the second element is independent of the first element is not that obvious by the definition of the product type
+    -- _×_ : ∀ (A : Set a) (B : Set b) → Set (a ⊔ b)
+    -- A × B = Σ[ x ∈ A ] B
   
     estepn : ℕ → framed ⊤
     estepn zero ([] , vs , []) = ok' ([] , vs , [])
@@ -519,7 +537,7 @@ module Example where
 
   run : List String
   run = (List.map show-eval (ex0 ∷ ex1 ∷ ex2 ∷ ex3 ∷ ex4 ∷ ex5 ∷ ex6 ∷ ex7 ∷ ex8 ∷ []))
-
+{-
 module Conv where
   open Nat
   open List hiding (and ; drop)

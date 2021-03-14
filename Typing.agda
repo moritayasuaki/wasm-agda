@@ -30,11 +30,19 @@ record slash (X : Set) (Y : Set): Set where
     left : X
     right : Y
 
+
 module _ where
   open List
   open Nat
   open import Data.List.Properties
   open import Relation.Binary.PropositionalEquality
+  llength : ∀ {X : Set} → List X → ℕ
+  llength = length
+  ltake : ∀ {X : Set} → ℕ → List X → List X
+  ltake = take
+  ldrop : ∀ {X : Set} → ℕ → List X → List X
+  ldrop = drop
+
   lemma : ∀ {X : Set} → (ab a b c : List X) → (ab ≡ a ++ b) → a ++ b ++ c ≡ (ab ++ c)
   lemma .(a ++ b) a b c refl = sym (++-assoc a b c)
 
@@ -52,7 +60,7 @@ module _ where
   lemma4 : ∀ {X : Set} → (a b c : List X) → a ≡ b ++ c → c ≡ drop (length b) a
   lemma4 .(b ++ c) b c refl = lemma4' b c
 
-  lemma5' : ∀ {X : Set} → (n : ℕ) → List.drop n [] ≡ []
+  lemma5' : ∀ {X : Set} → (n : ℕ) → drop {A = X} n [] ≡ []
   lemma5' zero = refl
   lemma5' (suc n) = refl
 
@@ -157,7 +165,7 @@ module Typing where
 
   data _:-fs_ : frames → ctxtype → Set where
     []  : ∀ {a} → [] :-fs a / [] ⇒ a
-    _∷_ : ∀ {f fs a b c n}
+    _∷_ : ∀ {f fs a b c}
           → f :-f (a ⇒ b)
           → fs :-fs b ⇒ c
           → f ∷ fs :-fs a ⇒ c
@@ -168,19 +176,20 @@ module Typing where
   tflookup-drop {p = a ∷ p} (tframe _ _ _ refl ∷ pfs) (suc fn) = tflookup-drop pfs fn
 -}
 
-  tfdrop2 : ∀{a c m p q r b fs} → (fs :-fs a / p ⇒ c) → (p ≡ q ++ (b ∷ r)) → ∃ λ a' → (List.drop (length q) fs :-fs a' / b ∷ r ⇒ c)
-  tfdrop2 {a = a} {q = []} (pf ∷ pfs) refl = (a , pf ∷ pfs)
-  tfdrop2 {q = _ ∷ _} (_∷_ {b = left / right} pf pfs) refl = tfdrop2 pfs {!!}
+  tfheadtail : ∀{a b c p ffs} → (ffs :-fs a / (b ∷ p) ⇒ c) → ∃ λ f → ∃ λ fs' → ∃ λ a' → (f :-f a / b ∷ p ⇒ a' / p) × (fs' :-fs a' / p ⇒ c) × (ffs ≡ f ∷ fs')
+  tfheadtail  (_∷_ {f@.(_ , length a , _ , _)} {fs'} {b = b / _} (pf@(tframe {a} _ _ _ refl)) pfs) = (f , fs' , b , pf , pfs , refl)
 
-  tfdrop : ∀{a c m p fs} → (n : ℕ) → (fs :-fs a / p ⇒ c) → ∃ λ b → (List.drop n fs :-fs b / List.drop n p ⇒ c)
-  tfdrop {a} n [] = (a , []')
-    where []' = subst (λ y → y :-fs a / List.drop n [] ⇒ a) (sym (lemma5' n)) (subst (λ x → [] :-fs a / x ⇒ a) (sym (lemma5' n)) [])
-  tfdrop {a} Nat.zero pfs = (a , pfs)
-  tfdrop {a} (Nat.suc n) (tframe {d} _ _ _ refl ∷ pfs) = tfdrop n pfs
+  tfdrop : ∀{a c fs q r b} → (fs :-fs a / q ++ (b ∷ r) ⇒ c) → ∃ λ a' → (List.drop (length q) fs :-fs a' / b ∷ r ⇒ c)
+  tfdrop {a = a} {fs = fs} {q = []} (pf ∷ pfs) = (a , pf ∷ pfs)
+  tfdrop {q = p ∷ ps} (pf ∷ pfs) with tfheadtail (pf ∷ pfs)
+  ... | _ , _ , _ , _ , pfs' , refl = tfdrop pfs'
 
-  tfdrop' : ∀{a c p fs} → (fn : Fin (length p)) → (fs :-fs a / p ⇒ c) → ∃ λ f → ∃ λ fs' → ∃ λ b → (f ∷ fs' :-fs b / List.drop (toℕ fn) p ⇒ c) × (f ∷ fs' ≡ List.drop (toℕ fn) fs)
-  tfdrop' {a} zero (_∷_ {f = vs , .(length b) , lis , cis} {fs = fs'} (tframe {a = b} plis pvs pcis refl) pfs) = ((vs , length b , lis , cis) , fs' , a , tframe plis pvs pcis refl ∷ pfs , refl)
-  tfdrop' {a} (suc n) (tframe _ _ _ refl ∷ pfs) = tfdrop' n pfs
+  tbr-helper : ∀{a b c d q r fs vs is} → (fs :-fs a / q ++ (b ∷ r) ⇒ c) → (vs :-vs b ++ d) → ∃ λ a' → ∃ λ fs' → ∃ λ vs' → ∃ λ lis' → ∃ λ cis' → Interpreter.br-helper (length q) (fs , vs , is) ≡ Interpreter.ok' (fs' , List.take (length b) vs ++ vs' , lis' ++ cis') × ((vs' , length b , lis' , cis') ∷ fs' :-fs a' / (b ∷ r) ⇒ c)
+  tbr-helper {b = b} {q = q} {fs = fs} {vs = vs} pfs pvs with List.drop (length q) fs | inspect (List.drop (length q)) fs
+  ... | ffs' | [ dropq-fs≡ffs' ] with tfdrop pfs 
+  ...                               |  (a' , pffs') with tfheadtail pffs'
+  ...                                                  | (f , fs' , b' , pf' , pfs' , dropq-fs≡f'∷fs') with trans (sym dropq-fs≡ffs') dropq-fs≡f'∷fs'
+  tbr-helper {b = b} {q = q} {fs = fs} {vs = vs} pfs pvs | .((vs' , length a , lis' , cis') ∷ fs') | [ dropq-fs≡ffs' ] | a' , pffs' | (vs' , .(length a) , lis' , cis') , fs' , b' , tframe {a} plis' pvs' pcis' refl , pfs' , dropq-fs≡f'∷fs' | refl = (a' , fs' , vs' , lis' , cis' , refl , tframe plis' pvs' pcis' refl ∷ pfs')
 
   data _:-_ : state → resulttype → Set where
     tstate : ∀ {a b c vs is fs}
@@ -214,12 +223,6 @@ module Typing where
                subst (λ x → i :-i' a ++ c ⇒ d ++ c / x) (sym p≡p') in
     let pis-w = weaken:-is c pis in pi-w ∷ pis-w
 
-  {-
-  _tf++_ : ∀ {fs fs' a b c} → (fs :-fs a ⇒ b) → (fs' :-fs b ⇒ c) → fs ++ fs' :-fs a ⇒ c
-  _tf++_ [] pfs' = pfs'
-  _tf++_ (pf ∷ pfs) pfs' = pf ∷ (pfs tf++ pfs')
-  -}
-
   tvtake : ∀ {vs ts} → ( n : Nat.ℕ ) → vs :-vs ts → List.take n vs :-vs List.take n ts
   tvtake Nat.zero _ = []
   tvtake (Nat.suc n) [] = []
@@ -241,158 +244,48 @@ module Typing where
   length-take-lookup-zero k ks {ts} = subst (λ x → k ≡ List.take (List.length k) (x ++ ts)) (lookup-zero {_} {ks} k) (take-length k)
 
   open Interpreter
+
   safety : ∀{t} → (st : state) → st :- t → ∃ λ st' → (estep st ≡ ok' st') × (st' :- t)
   safety ([] , vs , []) p = ([] , vs , []) , (refl , p)
   safety ((vs , _ , _ , cis) ∷ fs , vs' , []) (tstate ((tframe _ pvs pcis _) ∷ pfs) pvs' []) =
     (fs , vs' ++ vs , cis) , (refl , tstate pfs (pvs' tv++ pvs) pcis)
-  safety (fs' , vs , const x ∷ is) (tstate {_} {_ / _} pfs pvs (((.[] ⇒ _ ∷ .[] / _ , _) , tconst {_} pv , refl) ∷ pis)) with fs'
-  ... | [] = ([] , x ∷ vs , is) , (refl , tstate pfs (pv ∷ pvs) pis)
-  ... | f ∷ fs = (f ∷ fs , x ∷ vs , is) , (refl , tstate pfs (pv ∷ pvs) pis)
 
-  safety (fs' , vs , nop ∷ is) (tstate {_} {_ / _} pfs pvs (((.[] ⇒ .[] / _ , _) , tnop , refl) ∷ pis)) with fs'
-  ... | [] = ([] , vs , is) , (refl , tstate pfs pvs pis)
-  ... | f ∷ fs = (f ∷ fs , vs , is) , (refl , tstate pfs pvs pis)
+  safety (fs' , vs , const x ∷ is) (tstate {_} {_ / _} pfs pvs (((.[] ⇒ _ ∷ .[] / _ , _) , tconst {_} pv , refl) ∷ pis)) = (fs' , x ∷ vs , is) , (refl , tstate pfs (pv ∷ pvs) pis)
 
-  safety (fs' , bool v ∷ vs , not ∷ is) (tstate pfs (tbool ∷ pvs) ((_ , tnot , refl) ∷ pis)) with fs'
-  ... | [] = ([] , bool (Bool.not v) ∷ vs , is) , (refl , tstate pfs (tbool ∷ pvs) pis)
-  ... | f ∷ fs = (f ∷ fs , bool (Bool.not v) ∷ vs , is) , (refl , tstate pfs (tbool ∷ pvs) pis)
+  safety (fs' , vs , nop ∷ is) (tstate {_} {_ / _} pfs pvs (((.[] ⇒ .[] / _ , _) , tnop , refl) ∷ pis)) = (fs' , vs , is) , (refl , tstate pfs pvs pis)
 
-  safety (fs' , bool v ∷ bool v' ∷ vs , and ∷ is) (tstate pfs (tbool ∷ tbool ∷ pvs) ((_ , tand , refl) ∷ pis)) with fs'
-  ... | [] = ([] , bool (v Bool.∧ v') ∷ vs , is) , (refl , tstate pfs (tbool ∷ pvs) pis)
-  ... | f ∷ fs = (f ∷ fs , bool (v Bool.∧ v') ∷ vs , is) , (refl , tstate pfs (tbool ∷ pvs) pis)
+  safety (fs' , bool v ∷ vs , not ∷ is) (tstate pfs (tbool ∷ pvs) ((_ , tnot , refl) ∷ pis)) = (fs' , bool (Bool.not v) ∷ vs , is) , (refl , tstate pfs (tbool ∷ pvs) pis)
 
-  safety (fs' , nat n ∷ nat m ∷ vs , add ∷ is) (tstate pfs (tnat ∷ (tnat ∷ pvs)) ((_ , tadd , refl) ∷ pis)) with fs'
-  ... | [] = ([] , nat (n Nat.+ m) ∷ vs , is) , (refl , tstate pfs (tnat ∷ pvs) pis)
-  ... | f ∷ fs = (f ∷ fs , nat (n Nat.+ m) ∷ vs , is) , (refl , tstate pfs (tnat ∷ pvs) pis)
+  safety (fs' , bool v ∷ bool v' ∷ vs , and ∷ is) (tstate pfs (tbool ∷ tbool ∷ pvs) ((_ , tand , refl) ∷ pis)) = (fs' , bool (v Bool.∧ v') ∷ vs , is) , (refl , tstate pfs (tbool ∷ pvs) pis)
 
-  safety (fs' , nat n ∷ nat m ∷ vs , sub ∷ is) (tstate pfs (tnat ∷ (tnat ∷ pvs)) ((_ , tsub , refl) ∷ pis)) with fs'
-  ... | [] = ([] , nat (n Nat.∸ m) ∷ vs , is) , (refl , tstate pfs (tnat ∷ pvs) pis)
-  ... | f ∷ fs = (f ∷ fs , nat (n Nat.∸ m) ∷ vs , is) , (refl , tstate pfs (tnat ∷ pvs) pis)
+  safety (fs' , nat n ∷ nat m ∷ vs , add ∷ is) (tstate pfs (tnat ∷ (tnat ∷ pvs)) ((_ , tadd , refl) ∷ pis)) = (fs' , nat (n Nat.+ m) ∷ vs , is) , (refl , tstate pfs (tnat ∷ pvs) pis)
 
-  safety (fs' , nat n ∷ vs , eqz ∷ is) (tstate pfs (tnat ∷ pvs) ((_ , teqz , refl) ∷ pis)) with fs'
-  ... | [] = ([] , bool (feqz n) ∷ vs , is) , (refl , tstate pfs (tbool ∷ pvs) pis)
-  ... | f ∷ fs = (f ∷ fs , bool (feqz n) ∷ vs , is) , (refl , tstate pfs (tbool ∷ pvs) pis)
+  safety (fs' , nat n ∷ nat m ∷ vs , sub ∷ is) (tstate pfs (tnat ∷ (tnat ∷ pvs)) ((_ , tsub , refl) ∷ pis)) = (fs' , nat (n Nat.∸ m) ∷ vs , is) , (refl , tstate pfs (tnat ∷ pvs) pis)
 
-  safety (fs' , v ∷ vs , dup ∷ is) (tstate {_} {_ / _} pfs (pv ∷ pvs) (((_ ∷ .[] ⇒ .(_ ∷ _ ∷ []) / _ , _) , tdup , refl) ∷ pis)) with fs'
-  ... | [] = ([] , v ∷ v ∷ vs , is) , (refl , tstate pfs (pv ∷ pv ∷ pvs) pis)
-  ... | f ∷ fs = (f ∷ fs , v ∷ v ∷ vs , is) , (refl , tstate pfs (pv ∷ pv ∷ pvs) pis)
+  safety (fs' , nat n ∷ vs , eqz ∷ is) (tstate pfs (tnat ∷ pvs) ((_ , teqz , refl) ∷ pis)) = (fs' , bool (feqz n) ∷ vs , is) , (refl , tstate pfs (tbool ∷ pvs) pis)
 
-  safety (fs' , (._ ∷ vs) , drop ∷ is) (tstate pfs (x ∷ pvs) (((t ∷ .[] ⇒ .[] / p , c) , tdrop , refl) ∷ pis)) with fs'
-  ... | [] = ([] , vs , is) , (refl , tstate pfs pvs pis)
-  ... | f ∷ fs = (f ∷ fs , vs , is) , (refl , tstate pfs pvs pis)
+  safety (fs' , v ∷ vs , dup ∷ is) (tstate {_} {_ / _} pfs (pv ∷ pvs) (((_ ∷ .[] ⇒ .(_ ∷ _ ∷ []) / _ , _) , tdup , refl) ∷ pis)) = (fs' , v ∷ v ∷ vs , is) , (refl , tstate pfs (pv ∷ pv ∷ pvs) pis)
 
-  safety (fs' , vs , block (a ⇒ b) is ∷ cis) (tstate pfs pvs (_∷_ {c = d} (((.a ⇒ .b / p) , c) , tblock pis , refl) pcis)) with fs'
-  ... | [] = ((List.drop (length a) vs , length b , [] , cis) ∷ [] , List.take (length a) vs , is) , (refl , tstate ((tframe [] (tvdrop (length a) pvs) pcis' refl) ∷ pfs) (tvtake (length a) pvs) pis')
-    where pcis' = subst (λ x → cis :-is b ++ x ⇒ d / p) (lemma4' a c) pcis
-          pis' = subst (λ x → is :-is x ⇒ b / b ∷ p) (lemma3' a c) pis
-  ... | f ∷ fs = ((List.drop (length a) vs , length b , [] , cis) ∷ f ∷ fs , List.take (length a) vs , is) , (refl , tstate ((tframe [] (tvdrop (length a) pvs) pcis' refl) ∷ pfs) (tvtake (length a) pvs) pis')
+  safety (fs' , (._ ∷ vs) , drop ∷ is) (tstate pfs (x ∷ pvs) (((t ∷ .[] ⇒ .[] / p , c) , tdrop , refl) ∷ pis)) = (fs' , vs , is) , (refl , tstate pfs pvs pis)
+
+  safety (fs' , vs , block (a ⇒ b) is ∷ cis) (tstate pfs pvs (_∷_ {c = d} (((.a ⇒ .b / p) , c) , tblock pis , refl) pcis)) = ((List.drop (length a) vs , length b , [] , cis) ∷ fs' , List.take (length a) vs , is) , (refl , tstate ((tframe [] (tvdrop (length a) pvs) pcis' refl) ∷ pfs) (tvtake (length a) pvs) pis')
     where pcis' = subst (λ x → cis :-is b ++ x ⇒ d / p) (lemma4' a c) pcis
           pis' = subst (λ x → is :-is x ⇒ b / b ∷ p) (lemma3' a c) pis
 
-  safety (fs' , bool bb ∷ vs , if-else (a ⇒ b) is-t is-f ∷ cis) (tstate pfs (tbool ∷ pvs) (_∷_ {c = d} (((.(bool ∷ a) ⇒ .b / p) , c) , tif-else pis-t pis-f , refl) pcis)) with fs' | bb
-  ... | [] | true = ((List.drop (length a) vs , length b , [] , cis) ∷ [] , List.take (length a) vs , is-t) , (refl , tstate ((tframe [] (tvdrop (length a) pvs) pcis' refl) ∷ pfs) (tvtake (length a) pvs) pis-t')
+  safety (fs' , bool bb ∷ vs , if-else (a ⇒ b) is-t is-f ∷ cis) (tstate pfs (tbool ∷ pvs) (_∷_ {c = d} (((.(bool ∷ a) ⇒ .b / p) , c) , tif-else pis-t pis-f , refl) pcis)) with bb
+  ... | true = ((List.drop (length a) vs , length b , [] , cis) ∷ fs' , List.take (length a) vs , is-t) , (refl , tstate ((tframe [] (tvdrop (length a) pvs) pcis' refl) ∷ pfs) (tvtake (length a) pvs) pis-t')
     where pcis' = subst (λ x → cis :-is b ++ x ⇒ d / p) (lemma4' a c) pcis
           pis-t' = subst (λ x → is-t :-is x ⇒ b / b ∷ p) (lemma3' a c) pis-t
-  ... | [] | false = ((List.drop (length a) vs , length b , [] , cis) ∷ [] , List.take (length a) vs , is-f) , (refl , tstate ((tframe [] (tvdrop (length a) pvs) pcis' refl) ∷ pfs) (tvtake (length a) pvs) pis-f')
-    where pcis' = subst (λ x → cis :-is b ++ x ⇒ d / p) (lemma4' a c) pcis
-          pis-f' = subst (λ x → is-f :-is x ⇒ b / b ∷ p) (lemma3' a c) pis-f
-  ... | f ∷ fs | true = ((List.drop (length a) vs , length b , [] , cis) ∷ f ∷ fs , List.take (length a) vs , is-t) , (refl , tstate ((tframe [] (tvdrop (length a) pvs) pcis' refl) ∷ pfs) (tvtake (length a) pvs) pis-t')
-    where pcis' = subst (λ x → cis :-is b ++ x ⇒ d / p) (lemma4' a c) pcis
-          pis-t' = subst (λ x → is-t :-is x ⇒ b / b ∷ p) (lemma3' a c) pis-t
-  ... | f ∷ fs | false = ((List.drop (length a) vs , length b , [] , cis) ∷ f ∷ fs , List.take (length a) vs , is-f) , (refl , tstate ((tframe [] (tvdrop (length a) pvs) pcis' refl) ∷ pfs) (tvtake (length a) pvs) pis-f')
+  ... | false = ((List.drop (length a) vs , length b , [] , cis) ∷ fs' , List.take (length a) vs , is-f) , (refl , tstate ((tframe [] (tvdrop (length a) pvs) pcis' refl) ∷ pfs) (tvtake (length a) pvs) pis-f')
     where pcis' = subst (λ x → cis :-is b ++ x ⇒ d / p) (lemma4' a c) pcis
           pis-f' = subst (λ x → is-f :-is x ⇒ b / b ∷ p) (lemma3' a c) pis-f
 
-  safety (fs' , vs , loop (a ⇒ b) is ∷ cis) (tstate pfs pvs (_∷_ {c = d} (((.a ⇒ .b / p) , c) , tloop pis , refl) pcis)) with fs'
-  ... | [] = ((List.drop (length a) vs , length a , loop (a ⇒ b) is ∷ [] , cis) ∷ [] , List.take (length a) vs , is) ,
+  safety (fs' , vs , loop (a ⇒ b) is ∷ cis) (tstate pfs pvs (_∷_ {c = d} (((.a ⇒ .b / p) , c) , tloop pis , refl) pcis)) = ((List.drop (length a) vs , length a , loop (a ⇒ b) is ∷ [] , cis) ∷ fs' , List.take (length a) vs , is) ,
              (refl , tstate ((tframe (weaken:-i [] (tloop pis) ∷ []) (tvdrop (length a) pvs) pcis' len-a) ∷ pfs) (tvtake (length a) pvs) pis')
              where pcis' = subst (λ x → cis :-is (b ++ []) ++ x ⇒ d / p) (lemma4' a c) ∘ subst (λ x → cis :-is x ++ c ⇒ d / p ) (sym (++-identityʳ b)) $ pcis
                    len-a = sym (cong List.length (++-identityʳ a))
                    pis' = subst (λ x → is :-is x ⇒ b ++ [] / (a ++ []) ∷ p) (lemma3' a c) (subst (λ x → is :-is a ⇒ x / (a ++ []) ∷ p) (sym (++-identityʳ b)) (subst (λ x → is :-is a ⇒ b / x ∷ p) (sym (++-identityʳ a)) pis))
-  ... | f ∷ fs = ((List.drop (length a) vs , length a , loop (a ⇒ b) is ∷ [] , cis) ∷ f ∷ fs , List.take (length a) vs , is) ,
-                 (refl , tstate ((tframe (weaken:-i [] (tloop pis) ∷ []) (tvdrop (length a) pvs) pcis' len-a) ∷ pfs) (tvtake (length a) pvs) pis')
-             where pcis' = subst (λ x → cis :-is (b ++ []) ++ x ⇒ d / p) (lemma4' a c) ∘ subst (λ x → cis :-is x ++ c ⇒ d / p ) (sym (++-identityʳ b)) $ pcis
-                   len-a = sym (cong List.length (++-identityʳ a))
-                   pis' = subst (λ x → is :-is x ⇒ b ++ [] / (a ++ []) ∷ p) (lemma3' a c) (subst (λ x → is :-is a ⇒ x / (a ++ []) ∷ p) (sym (++-identityʳ b)) (subst (λ x → is :-is a ⇒ b / x ∷ p) (sym (++-identityʳ a)) pis))
 
---  safety (fs , vs , br .(toℕ fn) ∷ is) (tstate pfs pvs (((.(lookup (_ ∷ p) fn) ⇒ b / (_ ∷ p) , _) , tbrn .(toℕ fn) fn refl refl , refl) ∷ pis)) with tfdrop pfs 
-{-
-  safety (fs , vs , br .(toℕ fn) ∷ is) (tstate pfs pvs (((.(lookup (_ ∷ p) fn) ⇒ b / (_ ∷ p) , _) , tbrn .(toℕ fn) fn refl refl , refl) ∷ pis)) with tflookup-drop pfs fn
-  ... | (vs' , m , lis , cis) , d , e , pf , pfs' = ({!!} , List.take m vs ++ vs' , lis ++ cis) , ({!!} , {!!})
--}
-{-
-  safety ((vs' , .(List.length a) , lis , cis) ∷ fs' , vs , br .(toℕ fn) ∷ is) (tstate (tframe {b = b'} {c = c'} {d = d'} plis pvs' pcis refl ∷ pfs') pvs (((.(lookup (a ∷ p) fn) ⇒ b / (a ∷ p) , c) , tbrn .(toℕ fn) fn refl refl , refl) ∷ pis)) with fn
-  ... | zero = (fs' , List.take (List.length a) vs ++ vs' , lis ++ cis) , (refl , tstate pfs' (tvtake (List.length a) pvs tv++ pvs') (plis' ti++ pcis))
-    where plis' = weaken:-is c' ((subst λ x → lis :-is x ⇒ b' / p) (lemma3' a c) plis)
-  ... | suc n with tfdrop' n pfs'
-  ... | (vs'' , m , lis' , cis') , fs'' , b'' , (x ∷ pfs) , eq = {!!}
--}
-  safety (fs , vs , br .(length q) ∷ _) (tstate pfs pvs (((a ⇒ b / .(q ++ a ∷ _) , c) , tbrn {q = q} .(length q) refl refl , refl) ∷ _)) with tfdrop (length q) pfs
-  ... | (d , hoge) = {!!} , {!!}
-{-
-  safety (fs , vs , br n ∷ _) (tstate pfs pvs (((a ⇒ b / p , c) , tbrn , e3) ∷ _)) with tfdrop n pfs
-  safety (fs , vs , br .(toℕ fn) ∷ _) (tstate pfs pvs (((.(lookup p fn) ⇒ b / p , c) , tbrn .(toℕ fn) fn refl refl , refl) ∷ _)) | d , pf ∷ pfs' =
-    (List.drop (Nat.suc (toℕ fn)) fs , ? , {!!}) , ({!!} , {!!})
--}
-  {-
-  ... | d , (_∷_ {b = d / p} (tframe plis'' pvs'' pcis'' refl) pfs'') = ?
-    where plis' = weaken:-is c' ((subst λ x → lis :-is x ⇒ b' / p) (lemma3' a c) plis)
-          plis'++pcis = subst (λ x → lis ++ cis :-is x ++ c' ⇒ d' / p) (sym (lemma3' a c)) (plis' ti++ pcis)
-          pbrn = (((lookup p fm ⇒ a / p , c') , tbrn (toℕ fm) fm refl refl , {!!}) ∷ pcis)
-          -- pbrn'' = (weaken:-i c (tbrn (toℕ fm) fm refl refl)) ∷ plis'++pcis
-          pp = safety (fs' , List.take (length (lookup p fm)) vs , br (toℕ fm) ∷ cis) (tstate pfs' (tvtake (List.length (lookup p fm)) pvs) pbrn)
-  -}
---     where  ff = safety (fs' , vs , br (toℕ fm) ∷ cis) (tstate pfs' pvs (((lookup p fm ⇒ d' / p , c) , tbrn (toℕ fm) fm refl refl , refl) ∷ {!!}))
---            gg = safety ((vs' , List.length a , lis , cis) ∷ fs' , {!!} , is) (tstate (tframe plis pvs' pcis refl ∷ pfs') {!!} pis)
---           ff' = tfdrop (toℕ fm) pfs'
-{-
-    let (vs' , m , lis , cis) = lookup' fs p pfs f in
-    let fs' = List.drop (Nat.suc (toℕ f)) fs in
-    (fs' , List.take m vs ++ vs' , lis ++ cis) , (refl , ?)
--}
-{-
-  safety ((vs' , .(List.foldr (λ _ → Nat.suc) 0 a'') , lis , cis) ∷ fs , vs , br 0 ∷ is) (tstate {a = a'} {b = b' / a'' ∷ p'} {c'} (tframe {c = c''} {d} plis pvs' pcis refl ∷ pfs) pvs (_∷_ {a = a'} {b = b''} {c = b'} {p = .(a'' ∷ p')} ((dom₁ ⇒ .(_ / _) , snd₁) , tbrn .0 f x x₁ , snd) pis)) = {!!}
-  -}
-  {-
-    let plis' = subst (λ x → lis :-is x ⇒ b' / p') (lemma3' a'' c) plis in
-    (fs , List.take m vs ++ vs' , lis ++ cis) , (refl , tstate pfs (tvtake m pvs tv++ pvs') ((weaken:-is c'' plis') ti++ pcis))
-  safety ((vs' , m , lis , cis) ∷ fs , vs , br (Nat.suc n) ∷ is) (tstate tfs tvs (((.(lookup (l ∷ p) f) ⇒ b / l ∷ p , snd) , tbrn .(toℕ f) f refl refl , qq) ∷ tis)) = ?
--}
-    -- safety (fs , vs , br (toℕ fn) ∷ cis) (tstate pfs pvs ?)
-    {-
-    let (vs'' , m' , lis' , cis') = lookup' fs p' pfs fn in
-    let fs' = List.drop (toℕ fn) fs in
-    let p'' = List.drop (toℕ fn) p' in
-    (fs' , List.take m' vs ++ vs'' , lis' ++ cis') , (refl , ?)
-    -}
-{-
-  safety ((vs' , m , lis , cis) ∷ fs , vs , br 0 ∷ is) (tstate {a = a'} {b = b' / a'' ∷ p'} {c'} ((tframe {c = c''} plis pvs' pcis refl) ∷ pfs) pvs (_∷_ {a = a'} {b = b''} {c = b'} {p = a'' ∷ p'} pi' pis)) with pi'
-  ... | (.a'' ⇒ b / .(a'' ∷ p') , c) , tbrn .0 zero refl refl , refl =
-    let plis' = subst (λ x → lis :-is x ⇒ b' / p') (lemma3' a'' c) plis in
-    (fs , List.take m vs ++ vs' , lis ++ cis) , (refl , tstate pfs (tvtake m pvs tv++ pvs') ((weaken:-is c'' plis') ti++ pcis))
-  safety ((vs' , m , lis , cis) ∷ fs , vs , br (Nat.suc n) ∷ is) (tstate {a = a'} {b = b' / a'' ∷ p'} {c'} ((tframe {c = c''} {d} plis pvs' pcis refl) ∷ pfs) pvs (_∷_ {a = a'} {b = b''} {c = b'} {p = a'' ∷ p'} pi' pis)) with pi'
-  ... | (.(lookup p' f) ⇒ b / .(a'' ∷ p') , c) , tbrn .(Nat.suc (toℕ f)) (suc f) refl refl , refl =
-    let aa : br (toℕ f) :-i' lookup p' f ++ [] ⇒ d ++ [] / p'
-        aa = weaken:-i [] (tbrn (toℕ f) f refl refl) in
-    let aa' = subst (λ x → br (toℕ f) :-i' x ⇒ d ++ [] / p') (++-identityʳ (lookup p' f)) aa in
-    let aa'' = subst (λ x → br (toℕ f) :-i' lookup p' f ⇒ x / p') (++-identityʳ d) aa' in
-    let s = safety (fs , vs , br n ∷ []) (tstate pfs pvs {!!}) in {!!}
--}
-
-{-
-  safety ((vs' , m , lis , cis) ∷ fs , vs , br n ∷ is) (tstate {a = a'} {b = b' / a'' ∷ p'} {c'} ((tframe {c = c''} plis pvs' pcis refl) ∷ pfs) pvs (_∷_ {a = a'} {b = b''} {c = b'} {p = a'' ∷ p'} pi' pis)) with pi'
-  ... | (.(a'' ⇒ _ / a'' ∷ p') , c) , tbrn .0 zero refl refl , refl =
-    let plis' = subst (λ x → lis :-is x ⇒ b' / p') (lemma3' a'' c) plis in
-    (fs , List.take m vs ++ vs' , lis ++ cis) , (refl , tstate pfs (tvtake m pvs tv++ pvs') ((weaken:-is c'' plis') ti++ pcis))
-  ... | (.(lookup p' f ⇒ _ / a'' ∷ p') , c) , tbrn .(Nat.suc (toℕ f)) (suc f) refl refl , refl =
-    let p = safety (fs , vs , br (toℕ f) ∷ []) (tstate pfs pvs {!!}) in {!!}
-    -}
-{-    let (g , h , q ) = eq-lfunctype eq in
-    let t = cong (λ x → lis :-is List.take x a' ⇒ b' / p') meq in
-    let leneq : length p ≡ (Nat.suc (length p'))
-        leneq = cong length (sym q) in
-    let fn-zero = toℕ-injective {i = fn} {j = ?} refl in
-    let s' = subst (λ x → a ≡ lookup x fn) (sym q) p2 in
-    (fs , List.take m vs ++ vs' , lis ++ cis) ,
-    (refl , tstate pfs (tvtake m pvs tv++ pvs') {!!}) -- ((weaken:-is c'' plis) ti++ pcis))
--}
+  safety (fs , vs , br .(length q) ∷ is) (tstate pfs pvs (((.(_ ⇒ _ / q ++ a ∷ _) , e) , tbrn {a = a} {q = q} {r = r} .(length q) refl refl , refl) ∷ pis)) with tbr-helper {is = is} pfs pvs
+  ... | a' , fs' , vs' , lis' , cis' , pbr , (tframe {c = c} plis' pvs' pcis' refl ∷ pfs') = (fs' , List.take (length a) vs ++ vs' , lis' ++ cis') , (pbr , tstate pfs' (tvtake (length a) pvs tv++ pvs') (plis'' ti++ pcis')) 
+    where plis'' = weaken:-is c ( subst (λ x → lis' :-is x ⇒ a' / r) (lemma3' a e) plis')
