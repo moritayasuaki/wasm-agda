@@ -492,12 +492,14 @@ module Interpreter where
     estep (fs , vs , br-if n ∷ is) = eifstep (fs , vs , br-if n ∷ is)
     estep ([] , vs , []) = ok' ([] , vs , [])
     estep (f ∷ fs , vs , []) = eend (f ∷ fs , vs , [])
-    -- pattern matching for `fs` must be bottom of the cases, and you can not place it to the begening of the function.
-    -- Otherwise agda requires frames to destruct in any cases and `estep (fs , vs , br n)` won't be able to normalize `eifstep ...` in the proof of safety.
-    -- Possively I should avoid using product type for arguments of `estep`, because telling that the type of the second element is independent of the first element is not that obvious by the definition of the product type
+    -- pattern matching for `fs` (the cases for `[]` and `f ∷ fs`) must be here on the bottom of the cases, and you can not place it to the beginning of the function definition.
+    -- Otherwise, in the proof of safety, agda requires patttarn-matching on `fs` to normalize the term in any other case, and `estep (fs , vs , br n)` won't be able to normalize `eifstep ...` in a natural way.
+    -- Possively I should avoid using product type to the argument of `estep` (which is a state), because telling that the types of the second and later element is independent of the first element is not that obvious by the definition of the product type
+    -- ```
     -- _×_ : ∀ (A : Set a) (B : Set b) → Set (a ⊔ b)
     -- A × B = Σ[ x ∈ A ] B
-  
+    -- ```
+   
     estepn : ℕ → framed ⊤
     estepn zero ([] , vs , []) = ok' ([] , vs , [])
     estepn zero _ = error "timeout"
