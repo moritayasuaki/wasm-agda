@@ -64,6 +64,7 @@ module Syntax where
   module _ where
     open Bool hiding (not)
     open Nat
+    open Fin
     open Unit
     open List hiding (and ; drop)
     open Monad.IList hiding (drop)
@@ -85,84 +86,39 @@ module Syntax where
       nat : ℕ → val
       unit : ⊤ → val
 
-    data insn : Set where
-      const : val → insn
-      nop : insn
-      not : insn
-      and : insn
-      add : insn
-      sub : insn
-      eqz : insn
-      dup : insn
-      drop : insn
-      block : functype → List insn → insn
-      if-else : functype → List insn → List insn → insn
-      loop : functype → List insn → insn
-      br : ℕ → insn
-      br-if : ℕ → insn
+    data insn : ℕ → Set where
+      const : {n : ℕ} → val → insn n
+      nop : {n : ℕ} → insn n
+      not : {n : ℕ} → insn n
+      and : {n : ℕ} → insn n
+      add : {n : ℕ} → insn n
+      sub : {n : ℕ} → insn n
+      eqz : {n : ℕ} → insn n
+      dup : {n : ℕ} → insn n
+      drop : {n : ℕ} → insn n
+      block : {n : ℕ} → functype → List (insn (suc n)) → insn n
+      if-else : {n : ℕ} → functype → List (insn (suc n)) → List (insn (suc n)) → insn n
+      loop : {n : ℕ} → functype → List (insn (suc n)) → insn n
+      br : {n : ℕ} → (l : Fin n) → insn n
+      br-if : {n : ℕ} → (l : Fin n) → insn n
 
-    data insn' : ℕ → Set where
-      const' : {n : ℕ} → val → insn' n
-      nop' : {n : ℕ} → insn' n
-      not' : {n : ℕ} → insn' n
-      and' : {n : ℕ} → insn' n
-      add' : {n : ℕ} → insn' n
-      sub' : {n : ℕ} → insn' n
-      eqz' : {n : ℕ} → insn' n
-      dup' : {n : ℕ} → insn' n
-      drop' : {n : ℕ} → insn' n
-      block' : {n : ℕ} → functype → List (insn' (suc n)) → insn' n
-      if-else' : {n : ℕ} → functype → List (insn' (suc n)) → List (insn' (suc n)) → insn' n
-      loop' : {n : ℕ} → functype → List (insn' (suc n)) → insn' n
-      br' : {n : ℕ} → ℕ → insn' n
-      br-if' : {n : ℕ} → ℕ → insn' n
-
-    lightcheck : (n : ℕ) → List insn → List (insn' n)
-    lightcheck n (const v ∷ is) = const' {n} v ∷ lightcheck n is
-    lightcheck n (nop ∷ is) = nop' {n} ∷ lightcheck n is
-    lightcheck n (not ∷ is) = not' {n} ∷ lightcheck n is
-    lightcheck n (and ∷ is) = and' {n} ∷ lightcheck n is
-    lightcheck n (add ∷ is) = add' {n} ∷ lightcheck n is
-    lightcheck n (sub ∷ is) = sub' {n} ∷ lightcheck n is
-    lightcheck n (eqz ∷ is) = eqz' {n} ∷ lightcheck n is
-    lightcheck n (dup ∷ is) = dup' {n} ∷ lightcheck n is
-    lightcheck n (drop ∷ is) = drop' {n} ∷ lightcheck n is
-    lightcheck n (block ft is' ∷ is) = block' {n} ft (lightcheck (suc n) is') ∷ lightcheck n is
-    lightcheck n (if-else ft is' is'' ∷ is) = if-else' {n} ft (lightcheck (suc n) is') (lightcheck (suc n) is'') ∷ lightcheck n is
-    lightcheck n (loop ft is' ∷ is) = loop' {n} ft (lightcheck (suc n) is') ∷ lightcheck n is
-    lightcheck n (br l  ∷ is) = br' {n} l ∷ lightcheck n is       -- should report error when n ≤ l?
-    lightcheck n (br-if l  ∷ is) = br-if' {n} l ∷ lightcheck n is
-    lightcheck n [] = []
-  
     vals : Set
     vals = List val
 
-    insns : Set
-    insns = List insn
+    insns : ℕ → Set
+    insns n = List (insn n)
 
     -- we take resulttype as value stack instead of taking sequence of const instruction (so innermost block context does not include value and insts)
-    frame : Set
-    frame = vals × Nat.ℕ × insns × insns
+    frame : ℕ → Set
+    frame n = vals × ℕ × insns n × insns n
 
-    frames : ℕ → Set
-    frames n = Vec frame n
+    data frames : ℕ → Set where
+      [] : frames zero
+      _∷_ : {n : ℕ} → frame n → frames n → frames (suc n)
 
     state : ℕ → Set
-    state n = frames n × vals × insns
+    state n = frames n × vals × insns n
 
-{-
-    non-ctrl-insn : insn → Bool
-    non-ctrl-insn nop = true
-    non-ctrl-insn and = true
-    non-ctrl-insn not = true
-    non-ctrl-insn add = true
-    non-ctrl-insn sub = true
-    non-ctrl-insn eqz = true
-    non-ctrl-insn dup = true
-    non-ctrl-insn drop = true
-    non-ctrl-insn (br _) = false
-    non-ctrl-insn _ = false
--}
   module _ where
     open String
     open List hiding (_++_)
@@ -190,14 +146,14 @@ module Syntax where
     show-functype (a ⇒ b) = show-resulttype a ++ "⇒" ++ show-resulttype b
 
     mutual
-      show-insns : insns → String
+      show-insns : ∀{n} → insns n → String
       show-insns is = "[" ++ go is ++ "]" where
-        go : insns → String
+        go : ∀ {n} → insns n → String
         go [] = ""
         go (i ∷ []) = show-insn i
         go (i ∷ is) = show-insn i ++ " " ++ show-insns is
 
-      show-insn : insn → String
+      show-insn : ∀{n} → insn n → String
       show-insn (const n) = concat-with-space ("const" ∷ show-val n ∷ [])
       show-insn nop = "nop"
       show-insn not = "not"
@@ -210,14 +166,15 @@ module Syntax where
       show-insn (block ft is) = concat-with-space ("block" ∷ show-functype ft ∷ show-insns is ∷ [])
       show-insn (if-else ft ist isf) = concat-with-space ("if" ∷ show-functype ft ∷ show-insns ist ∷ show-insns isf ∷ [])
       show-insn (loop ft is) = concat-with-space ("loop" ∷ show-functype ft ∷ show-insns is ∷ [])
-      show-insn (br n) = concat-with-space ("br" ∷ NS.show n ∷ [])
-      show-insn (br-if n) = concat-with-space ("br-if" ∷ NS.show n ∷ [])
+      show-insn (br n) = concat-with-space ("br" ∷ NS.show (Fin.toℕ n) ∷ [])
+      show-insn (br-if n) = concat-with-space ("br-if" ∷ NS.show (Fin.toℕ n) ∷ [])
 
-    show-frame : frame → String
+    show-frame : ∀{n} → frame n → String
     show-frame (vs , a , l , is) = show-vals vs ++ "ℓ" ++ NS.show a ++ "{" ++ show-insns l ++ "}" ++ "*" ++ show-insns is
 
-    show-frames : {n : Nat.ℕ} → frames n → String
-    show-frames fs = "[" ++ show-list-with-sep show-frame " " (Vec.toList fs) ++ "]"
+    show-frames : ∀{n} → frames n → String
+    show-frames [] = ""
+    show-frames (f ∷ fs) = show-frame f ++ " " ++ show-frames fs
 
     show-state : {n : Nat.ℕ} → state n → String
     show-state (fs , vs , is) = "(" ++ show-frames fs ++ ", " ++ show-vals vs ++ ", " ++ show-insns is ++ ")"
@@ -320,6 +277,7 @@ module Interpreter where
   open Category.Monad.State
   open InterpreterCore public
   open Show
+  open Fin
 
 
   interp-valtype : valtype → Set
@@ -328,11 +286,11 @@ module Interpreter where
   interp-valtype unit = ⊤
 
   module _ where
-    non-framed = state-machine (λ _ → vals × insns)
-    non-framed-result = state-machine-result (λ _ → vals × insns)
-    result-non-framed = result (vals × insns)
+    non-framed = state-machine (λ n → vals × insns n)
+    non-framed-result = state-machine-result (λ n → vals × insns n)
+    result-non-framed = λ n → result (vals × insns n)
 
-    module non-framed-M = RawIMonad (state-machine-monad (λ _ → vals × insns))
+    module non-framed-M = RawIMonad (state-machine-monad (λ n → vals × insns n))
     open non-framed-M
 
     push : ∀{n} → val → non-framed n n ⊤
@@ -355,16 +313,16 @@ module Interpreter where
     popchk : ∀{n} → (t : valtype) → non-framed n n (interp-valtype t)
     popchk t = pop >>= chkval t
   
-    fetch : ∀{n} → non-framed n n insn
+    fetch : ∀{n} → non-framed n n (insn n)
     fetch (vs , (i ∷ is)) = ok (i , vs , is)
     fetch _ = error "no instuction to fetch"
 
   
-    emit : ∀{n} → insn → non-framed n n ⊤
+    emit : ∀{n} → insn n → non-framed n n ⊤
     emit i (vs , is) = ok' (vs , i ∷ is)
   
     module NonFramed where
-      einsn : ∀{n} → insn → non-framed n n ⊤
+      einsn : ∀{n} → insn n → non-framed n n ⊤
       einsn (const v) = do push v
       einsn nop = return tt
       einsn and = do
@@ -377,7 +335,7 @@ module Interpreter where
       einsn add = do
         x ← popchk nat
         y ← popchk nat
-        push $ nat ( x + y )
+        push $ nat ( x Nat.+ y )
       einsn sub = do
         x ← popchk nat
         y ← popchk nat
@@ -400,19 +358,19 @@ module Interpreter where
 
 
   module _ where
-    framed = state-machine (λ n → frames n × vals × insns)
-    framed-result = state-machine-result (λ n → frames n × vals × insns)
+    framed = state-machine (λ n → frames n × vals × insns n)
+    framed-result = state-machine-result (λ n → frames n × vals × insns n)
 
-    module framed-M = RawIMonad (state-machine-monad (λ n → frames n × vals × insns))
+    module framed-M = RawIMonad (state-machine-monad (λ n → frames n × vals × insns n))
     open framed-M 
 
-    lift : ∀{X : Set} → ∀ {n} → non-framed n n X → framed n n X
-    lift {X} {n} nf (fs , vs , is) = f (nf (vs , is))
+    lift' : ∀{X : Set} → ∀ {n} → non-framed n n X → framed n n X
+    lift' {X} {n} nf (fs , vs , is) = f (nf (vs , is))
       where f : non-framed-result X n → framed-result X n
             f (ok (x , s)) = ok (x , fs , s)
             f (error e) = (error e)
 
-    prepend : ∀{n} → insns → framed n n ⊤
+    prepend : ∀{n} → insns n → framed n n ⊤
     prepend is' (fs , vs , is) = ok' (fs , vs , is' ++ is)
 
     append : ∀{n} → vals → framed n n ⊤
@@ -424,62 +382,59 @@ module Interpreter where
     vswap : ∀{n} → vals → framed n n vals
     vswap vs (fs , vs' , is) = ok (vs' , fs , vs , is)
 
-    enter : ∀{n} → frame → framed n (suc n) ⊤
-    enter (vs' , a , l , is') (fs , vs , is) = ok' ((vs , a , l , is) ∷ fs , vs' , is')
+    enter : ∀{n} → vals → ℕ → insns n → insns (suc n) → framed n (suc n) ⊤
+    enter vs' a l is' (fs , vs , is) = ok' ((vs , a , l , is) ∷ fs , vs' , is')
   
-    leave : ∀{n} → framed (suc n) n frame
-    leave (_∷_ {Nat.suc n} (vs , a , l , is) fs , vs' , is') = ok ((vs' , a , l , is') , fs , vs , is)
+    leave : ∀{n} → framed (suc n) n (vals × ℕ × insns n)
+    leave ((vs , a , l , is) ∷ fs , vs' , is') = ok ((vs' , a , l) , fs , vs , is)
   
-{-
-    br-helper : ℕ → framed ⊤
-    br-helper n (fs , vs , _) with List.drop n fs
-    ... | [] = error "branch to outside" 
-    ... | (vs' , m , lis , cis) ∷ fs' = ok' (fs' , (take m vs) ++ vs' , lis ++ cis)
+    open import Relation.Binary.PropositionalEquality
+    toℕ-fromℕ : ∀ n → toℕ (fromℕ n) ≡ n
+    toℕ-fromℕ zero = refl
+    toℕ-fromℕ (suc n) = cong suc (toℕ-fromℕ n)
 
-
-    {-
-    br-helper zero = do
-      (vs , n , lcont , _) ← leave
+    br-helper : ∀{n} → (m : Fin (suc n)) → framed (suc n) (n ∸ (toℕ m)) ⊤
+    br-helper {n} zero = do
+      let p = subst (λ x → framed (suc n) x (vals × ℕ × insns n)) (sym (toℕ-fromℕ n))
+      (vs , a , lcont) ← leave
       prepend lcont
-      append (take n vs)
-    br-helper (suc m) = do
-      (vs , _ , _ , _) ← leave
+      append (take a vs)
+    br-helper {suc n} (suc m) = do
+      (vs , _ , _) ← leave
       vswap vs
       br-helper m
-    -}
-  
-    einsn : insn → framed ⊤
-    einsn (block (a ⇒ b) is) = do
+
+    eenter : ∀{n} → insn n → framed n (suc n) ⊤
+    eenter (block (a ⇒ b) is) = do
       vs ← split (length a)
       enter (vs , length b , [] , is)
-    einsn (if-else (a ⇒ b) ist isf) = do
+    eenter (if-else (a ⇒ b) ist isf) = do
       p ← lift (popchk bool)
       vs ← split (length a)
       if p then enter (vs , length b , [] , ist)
            else enter (vs , length b , [] , isf)
-    einsn (loop (a ⇒ b) is) = do
+    eenter (loop (a ⇒ b) is) = do
       vs ← split (length a)
       enter (vs , length a , loop (a ⇒ b) is ∷ [] , is)
-  
-    einsn (br n) = do
-      br-helper n
-  
-    einsn (br-if n) = lift (popchk bool) >>= λ where
-        false → return tt
-        true → br-helper n
+    eenter _ = error "unsupported instruction"
 
-    einsn i = lift (NonFramed.einsn i)
-
-    eend : framed ⊤
+    eend : ∀{n} → framed (suc n) n ⊤
     eend = do
       vs , _ , _ , _ ← leave
       append vs
+  
+    -- frames are indexed by natural number, so state is also indexed.
+    -- state transition can be indexed by pair of natural number (index of prestate and index of poststate)
+    -- so should instruction be indexted by pair of natural number ?
+    ebr : ∀{n} → insn (suc n) → framed (suc n) (n ∸ (toℕ m)) ⊤
+    ebr (br n) = br-helper n
+    ebr (br-if n) = lift (popchk bool) >>= λ where
+      false → return tt
+      true → br-helper n
+    ebr _ = error "unsupported instruction"
 
-    eifstep : framed ⊤
-    eifstep = lift fetch >>= einsn
- 
+
     estep : framed ⊤
-    estep (fs , vs , br n ∷ is) = eifstep (fs , vs , br n ∷ is)
     estep (fs , vs , nop ∷ is) = (lift NonFramed.eistep) (fs , vs , nop ∷ is)
     estep (fs , vs , const v ∷ is) = (lift NonFramed.eistep) (fs , vs , insn.const v ∷ is)
     estep (fs , vs , and ∷ is) = (lift NonFramed.eistep) (fs , vs , and ∷ is)
@@ -489,10 +444,11 @@ module Interpreter where
     estep (fs , vs , eqz ∷ is) = (lift NonFramed.eistep) (fs , vs , eqz ∷ is)
     estep (fs , vs , dup ∷ is) = (lift NonFramed.eistep) (fs , vs , dup ∷ is)
     estep (fs , vs , drop ∷ is) = (lift NonFramed.eistep) (fs , vs , insn.drop ∷ is)
-    estep (fs , vs , block t is' ∷ is) = eifstep (fs , vs , block t is' ∷ is)
-    estep (fs , vs , if-else t is' is'' ∷ is) = eifstep (fs , vs , if-else t is' is'' ∷ is)
-    estep (fs , vs , loop t is' ∷ is) = eifstep (fs , vs , loop t is' ∷ is)
-    estep (fs , vs , br-if n ∷ is) = eifstep (fs , vs , br-if n ∷ is)
+    estep (fs , vs , block t is' ∷ is) = eenter (block t is') (fs , vs , is)
+    estep (fs , vs , if-else t is' is'' ∷ is) = eenter (if-else t is' is'') (fs , vs , is)
+    estep (fs , vs , loop t is' ∷ is) = eenter (loop t is') (fs , vs , is)
+    estep (fs , vs , br n ∷ is) = ebr (br n) (fs , vs , is)
+    estep (fs , vs , br-if n ∷ is) = ebr (br-if n) (fs , vs , is)
     estep ([] , vs , []) = ok' ([] , vs , [])
     estep (f ∷ fs , vs , []) = eend (f ∷ fs , vs , [])
     -- pattern matching for `fs` must be bottom of the cases, and you can not place it to the begening of the function.
