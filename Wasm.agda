@@ -423,9 +423,9 @@ module Interpreter where
       vs , _ , _ , _ ← leave
       append vs
   
-    -- frames are indexed by natural number, so state is also indexed.
-    -- state transition can be indexed by pair of natural number (index of prestate and index of poststate)
-    -- so should instruction be indexted by pair of natural number ?
+    -- When we define frames as a type family indexed by a natural number, type of state which includes frames also be indexed by a natural number.
+    -- Then, its small-step state transition can be indexed by a pair of natural number (a pair of indices of pre- and post-state).
+    -- Similary, should each instruction be indexed by a pair of natural number?
     ebr : ∀{n} → insn (suc n) → framed (suc n) (n ∸ (toℕ m)) ⊤
     ebr (br n) = br-helper n
     ebr (br-if n) = lift (popchk bool) >>= λ where
