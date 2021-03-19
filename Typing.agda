@@ -130,8 +130,8 @@ module Typing where
   weaken:-i : ∀{a b p i} → (c : resulttype) → (i :-i a ⇒ b / p) → i :-i' a ++ c ⇒ b ++ c / p
   weaken:-i {a} {b} {p} {i} c pi = (a ⇒ b / p , c) , (pi , refl)
 
-  weaken':-i : ∀{a b p i} → (i :-i a ⇒ b / p) → i :-i' a ⇒ b / p
-  weaken':-i {a} {b} {p} {i} pi = pi'
+  to:-i' : ∀{a b p i} → (i :-i a ⇒ b / p) → i :-i' a ⇒ b / p
+  to:-i' {a} {b} {p} {i} pi = pi'
     where pi' = subst (λ x → i :-i' x ⇒ b / p) (++-identityʳ a) (subst (λ x → i :-i' a ++ [] ⇒ x / p) (++-identityʳ b) (weaken:-i [] pi))
 
 
@@ -241,3 +241,19 @@ module Typing where
   safety (fs , vs , br .(length q) ∷ is) (tstate pfs pvs (((.(_ ⇒ _ / q ++ a ∷ _) , e) , tbrn {a = a} {q = q} {r = r} .(length q) refl refl , refl) ∷ pis)) with tbr-helper {is = is} pfs pvs
   ... | a' , fs' , vs' , lis' , cis' , pbr , (tframe {c = c} plis' pvs' pcis' refl ∷ pfs') = (fs' , List.take (length a) vs ++ vs' , lis' ++ cis') , (pbr , tstate pfs' (tvtake (length a) pvs tv++ pvs') (plis'' ti++ pcis')) 
     where plis'' = weaken:-is c ( subst (λ x → lis' :-is x ⇒ a' / r) (take-length a e) plis')
+
+module TypeExample where
+  open Typing
+  open Example
+  open List using ([] ; _∷_)
+  open import Relation.Binary.PropositionalEquality
+  -- ex0 = ([] , (nat 1 ∷ nat 2 ∷ []) , (add ∷ []))
+  tex0 : ex0 :- nat ∷ []
+  tex0 = tstate [] (tnat ∷ tnat ∷ []) (to:-i' tadd ∷ [])
+  -- ex1 = ([] , (bool true ∷ nat 1 ∷ nat 0 ∷ []) , ( not ∷ (if-else (nat ∷ nat ∷ [] ⇒ [ nat ]) [ add ] [ drop ]) ∷ []))
+  tex1 : ex1 :- nat ∷ []
+  tex1 = tstate [] (tbool ∷ tnat ∷ tnat ∷ []) (weaken:-i (nat ∷ nat ∷ []) tnot ∷ to:-i' p ∷ [])
+    where p = tif-else (to:-i' tadd ∷ []) (weaken:-i (nat ∷ []) tdrop ∷ [])
+  -- ex2 = ([] , [] , (block ([] ⇒ [ nat ]) (const (nat 1) ∷ block ([ nat ] ⇒ [ nat ]) (br 1 ∷ []) ∷ []) ∷ []))
+  tex2 : ex2 :- nat ∷ []
+  tex2 = tstate [] [] (to:-i' (tblock (to:-i' (tconst tnat) ∷  to:-i' (tblock (to:-i' (tbrn {q = (nat ∷ []) ∷ []} {r = []} 1 refl refl) ∷ [])) ∷ [])) ∷ []) 
