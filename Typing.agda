@@ -116,6 +116,11 @@ module Typing where
             → p ≡ q ++ (a ∷ r)
             → n ≡ length q
             → br n :-i a ⇒ b / p
+      tbrifn : ∀{a p q r}
+             → (n : ℕ)
+             → p ≡ q ++ (a ∷ r)
+             → n ≡ length q
+             → br-if n :-i bool ∷ a ⇒ a / p
 
     data _:-is_ : insns → lfunctype → Set where
       [] : ∀ {a p} → [] :-is a ⇒ a / p
@@ -241,6 +246,13 @@ module Typing where
   safety (fs , vs , br .(length q) ∷ is) (tstate pfs pvs (((.(_ ⇒ _ / q ++ a ∷ _) , e) , tbrn {a = a} {q = q} {r = r} .(length q) refl refl , refl) ∷ pis)) with tbr-helper {is = is} pfs pvs
   ... | a' , fs' , vs' , lis' , cis' , pbr , (tframe {c = c} plis' pvs' pcis' refl ∷ pfs') = (fs' , List.take (length a) vs ++ vs' , lis' ++ cis') , (pbr , tstate pfs' (tvtake (length a) pvs tv++ pvs') (plis'' ti++ pcis')) 
     where plis'' = weaken:-is c ( subst (λ x → lis' :-is x ⇒ a' / r) (take-length a e) plis')
+
+  safety (fs , bool true ∷ vs , br-if .(length q) ∷ is) (tstate pfs (tbool ∷ pvs) (((.(_ ⇒ _ / q ++ a ∷ _) , e) , tbrifn {a = a} {q = q} {r = r} .(length q) refl refl , refl) ∷ pis)) with tbr-helper {is = is} pfs pvs
+  ... | a' , fs' , vs' , lis' , cis' , pbr , (tframe {c = c} plis' pvs' pcis' refl ∷ pfs') = (fs' , List.take (length a) vs ++ vs' , lis' ++ cis') , (pbr , tstate pfs' (tvtake (length a) pvs tv++ pvs') (plis'' ti++ pcis')) 
+    where plis'' = weaken:-is c ( subst (λ x → lis' :-is x ⇒ a' / r) (take-length a e) plis')
+
+  safety (fs , bool false ∷ vs , br-if .(length q) ∷ is) (tstate pfs (tbool ∷ pvs) (((.(_ ⇒ _ / q ++ a ∷ _) , e) , tbrifn {a = a} {q = q} {r = r} .(length q) refl refl , refl) ∷ pis)) =
+    (fs , vs , is) , (refl , tstate pfs pvs pis)
 
 module TypeExample where
   open Typing
