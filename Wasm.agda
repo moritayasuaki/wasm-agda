@@ -34,8 +34,6 @@ record arrow (I : Set) (O : Set) : Set where
     dom : I
     cod : O
 
-
-
 module Show where
   open String
   open List hiding (_++_)
@@ -55,7 +53,6 @@ module Show where
 
   concat-with-colon : List String → String
   concat-with-colon = concat-with ": "
-
 
 module Syntax where
   open Product
