@@ -100,6 +100,7 @@ module Syntax where
       br : ℕ → insn
       br-if : ℕ → insn
 
+    open Fin using (Fin)
     data insn' : ℕ → Set where
       const' : {n : ℕ} → val → insn' n
       nop' : {n : ℕ} → insn' n
@@ -113,8 +114,8 @@ module Syntax where
       block' : {n : ℕ} → functype → List (insn' (suc n)) → insn' n
       if-else' : {n : ℕ} → functype → List (insn' (suc n)) → List (insn' (suc n)) → insn' n
       loop' : {n : ℕ} → functype → List (insn' (suc n)) → insn' n
-      br' : {n : ℕ} → ℕ → insn' n
-      br-if' : {n : ℕ} → ℕ → insn' n
+      br' : {n : ℕ} → Fin n → insn' n
+      br-if' : {n : ℕ} → Fin n → insn' n
 
     lightcheck : (n : ℕ) → List insn → List (insn' n)
     lightcheck n (const v ∷ is) = const' {n} v ∷ lightcheck n is
