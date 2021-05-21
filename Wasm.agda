@@ -94,44 +94,13 @@ module Syntax where
       eqz : insn
       dup : insn
       drop : insn
+      store : insn
+      load : insn
       block : functype → List insn → insn
       if-else : functype → List insn → List insn → insn
       loop : functype → List insn → insn
       br : ℕ → insn
       br-if : ℕ → insn
-
-    data insn' : ℕ → Set where
-      const' : {n : ℕ} → val → insn' n
-      nop' : {n : ℕ} → insn' n
-      not' : {n : ℕ} → insn' n
-      and' : {n : ℕ} → insn' n
-      add' : {n : ℕ} → insn' n
-      sub' : {n : ℕ} → insn' n
-      eqz' : {n : ℕ} → insn' n
-      dup' : {n : ℕ} → insn' n
-      drop' : {n : ℕ} → insn' n
-      block' : {n : ℕ} → functype → List (insn' (suc n)) → insn' n
-      if-else' : {n : ℕ} → functype → List (insn' (suc n)) → List (insn' (suc n)) → insn' n
-      loop' : {n : ℕ} → functype → List (insn' (suc n)) → insn' n
-      br' : {n : ℕ} → ℕ → insn' n
-      br-if' : {n : ℕ} → ℕ → insn' n
-
-    lightcheck : (n : ℕ) → List insn → List (insn' n)
-    lightcheck n (const v ∷ is) = const' {n} v ∷ lightcheck n is
-    lightcheck n (nop ∷ is) = nop' {n} ∷ lightcheck n is
-    lightcheck n (not ∷ is) = not' {n} ∷ lightcheck n is
-    lightcheck n (and ∷ is) = and' {n} ∷ lightcheck n is
-    lightcheck n (add ∷ is) = add' {n} ∷ lightcheck n is
-    lightcheck n (sub ∷ is) = sub' {n} ∷ lightcheck n is
-    lightcheck n (eqz ∷ is) = eqz' {n} ∷ lightcheck n is
-    lightcheck n (dup ∷ is) = dup' {n} ∷ lightcheck n is
-    lightcheck n (drop ∷ is) = drop' {n} ∷ lightcheck n is
-    lightcheck n (block ft is' ∷ is) = block' {n} ft (lightcheck (suc n) is') ∷ lightcheck n is
-    lightcheck n (if-else ft is' is'' ∷ is) = if-else' {n} ft (lightcheck (suc n) is') (lightcheck (suc n) is'') ∷ lightcheck n is
-    lightcheck n (loop ft is' ∷ is) = loop' {n} ft (lightcheck (suc n) is') ∷ lightcheck n is
-    lightcheck n (br l  ∷ is) = br' {n} l ∷ lightcheck n is       -- should report error when n ≤ l?
-    lightcheck n (br-if l  ∷ is) = br-if' {n} l ∷ lightcheck n is
-    lightcheck n [] = []
   
     vals : Set
     vals = List val
@@ -145,8 +114,15 @@ module Syntax where
 
     frames = List frame
 
-    state = frames × vals × insns
+    record memory : Set where
+      field
+        limit : ℕ
+        mem : Vec.Vec ℕ limit
 
+    initmem : memory
+    initmem = record {limit = 0; mem = Vec.[]}
+
+    config = frames × vals × insns × memory
 
   module _ where
     open String
@@ -192,6 +168,8 @@ module Syntax where
       show-insn eqz = "eqz"
       show-insn dup = "dup"
       show-insn drop = "drop"
+      show-insn store = "store"
+      show-insn load = "load"
       show-insn (block ft is) = concat-with-space ("block" ∷ show-functype ft ∷ show-insns is ∷ [])
       show-insn (if-else ft ist isf) = concat-with-space ("if" ∷ show-functype ft ∷ show-insns ist ∷ show-insns isf ∷ [])
       show-insn (loop ft is) = concat-with-space ("loop" ∷ show-functype ft ∷ show-insns is ∷ [])
@@ -204,8 +182,8 @@ module Syntax where
     show-frames : frames → String
     show-frames fs = "[" ++ show-list-with-sep show-frame " " fs ++ "]"
 
-    show-state : state → String
-    show-state (fs , vs , is) = "(" ++ show-frames fs ++ ", " ++ show-vals vs ++ ", " ++ show-insns is ++ ")"
+    show-config : config → String
+    show-config (fs , vs , is , mem) = "(" ++ show-frames fs ++ ", " ++ show-vals vs ++ ", " ++ show-insns is ++ ")"
 
 module Equality where
   open import Relation.Binary
@@ -270,17 +248,17 @@ module InterpreterCore where
 
   pattern ok' a = ok (tt , a)
 
-  record substate (S : Set) (S' : Set) : Set where
+  record subconfig (S : Set) (S' : Set) : Set where
     field
       view : S → S'
       update : S → S' → S
       eq : ∀(x : S) → update x (view x) PropositionalEquality.≡ x
 
-  upgrade : {S' S X : Set} → (substate S S') → state-machine S' X → state-machine S X
+  upgrade : {S' S X : Set} → (subconfig S S') → state-machine S' X → state-machine S X
   upgrade {S'} r ms' s = do
     x , t' ← ms' (view s)
     return $ x , update s t'
-    where open substate r
+    where open subconfig r
           open RawMonad resultMonad
 
 feqz : Nat.ℕ → Bool.Bool
@@ -480,6 +458,7 @@ module Interpreter where
     estep (fs , vs , br-if n ∷ is) = eifstep (fs , vs , br-if n ∷ is)
     estep ([] , vs , []) = ok' ([] , vs , [])
     estep (f ∷ fs , vs , []) = eend (f ∷ fs , vs , [])
+    estep _ = {!!}
     -- pattern matching for `fs` (the cases for `[]` and `f ∷ fs`) must be here on the bottom of the cases, and you can not place it to the beginning of the function definition.
     -- Otherwise, in the proof of safety, agda requires patttarn-matching on `fs` to normalize the term in any other case, and `estep (fs , vs , br n)` won't be able to normalize `eifstep ...` in a natural way.
     -- This is caused by difference in case tree
@@ -500,23 +479,23 @@ module Example where
   open Unit
   open Show
 
-  ex0 ex1 ex2 ex3 ex4 ex5 ex6 ex7 ex8 : state
-  ex0 = ([] , (nat 1 ∷ nat 2 ∷ []) , (add ∷ []))
-  ex1 = ([] , (bool true ∷ nat 1 ∷ nat 0 ∷ []) , ( not ∷ (if-else (nat ∷ nat ∷ [] ⇒ [ nat ]) [ add ] [ drop ]) ∷ []))
-  ex2 = ([] , [] , (block ([] ⇒ [ nat ]) (const (nat 1) ∷ block ([ nat ] ⇒ [ nat ]) (br 1 ∷ []) ∷ []) ∷ []))
-  ex3 = ([] , [] , (drop ∷ []))
-  ex4 = ([] , [] , (loop ([] ⇒ nat ∷ nat ∷ []) ([ br 0 ])) ∷ [])
-  ex5 = ([] , [] , block ([] ⇒ [ nat ]) (const (nat 1) ∷ []) ∷ [])
-  ex6 = ([] , bool true ∷ bool true ∷ [] , and ∷ [])
-  ex7 = ([] , bool true ∷ bool true ∷ [] , add ∷ [])
-  ex8 = ([] , nat 1 ∷ [] , block (nat ∷ [] ⇒ bool ∷ []) (const (nat 1) ∷ block (nat ∷ [] ⇒ []) (const (bool true) ∷ br 1 ∷ []) ∷ []) ∷ [])
+  ex0 ex1 ex2 ex3 ex4 ex5 ex6 ex7 ex8 : config
+  ex0 = ([] , (nat 1 ∷ nat 2 ∷ []) , (add ∷ []), initmem)
+  ex1 = ([] , (bool true ∷ nat 1 ∷ nat 0 ∷ []) , ( not ∷ (if-else (nat ∷ nat ∷ [] ⇒ [ nat ]) [ add ] [ drop ]) ∷ []) , initmem)
+  ex2 = ([] , [] , (block ([] ⇒ [ nat ]) (const (nat 1) ∷ block ([ nat ] ⇒ [ nat ]) (br 1 ∷ []) ∷ []) ∷ []) , initmem)
+  ex3 = ([] , [] , (drop ∷ []) , initmem)
+  ex4 = ([] , [] , (loop ([] ⇒ nat ∷ nat ∷ []) ([ br 0 ])) ∷ [] , initmem)
+  ex5 = ([] , [] , block ([] ⇒ [ nat ]) (const (nat 1) ∷ []) ∷ [] , initmem)
+  ex6 = ([] , bool true ∷ bool true ∷ [] , and ∷ [] , initmem)
+  ex7 = ([] , bool true ∷ bool true ∷ [] , add ∷ [] , initmem)
+  ex8 = ([] , nat 1 ∷ [] , block (nat ∷ [] ⇒ bool ∷ []) (const (nat 1) ∷ block (nat ∷ [] ⇒ []) (const (bool true) ∷ br 1 ∷ []) ∷ []) ∷ [] , initmem)
 
-  show-result : result (⊤ × state) → String
-  show-result (ok' st) = concat-with-colon (show-state st ∷ [])
+  show-result : result (⊤ × config) → String
+  show-result (ok' st) = concat-with-colon (show-config st ∷ [])
   show-result (error emesg) = concat-with-colon ("error" ∷ emesg ∷ [])
 
-  show-eval : state → String
-  show-eval ex = show-state ex ++ " ↪* " ++ show-result (estepn 1024 ex)
+  show-eval : config → String
+  show-eval ex = show-config ex ++ " ↪* " ++ show-result {!!} -- (estepn 1024 ex)
 
   run : List String
   run = (List.map show-eval (ex0 ∷ ex1 ∷ ex2 ∷ ex3 ∷ ex4 ∷ ex5 ∷ ex6 ∷ ex7 ∷ ex8 ∷ []))
