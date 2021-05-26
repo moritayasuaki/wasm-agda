@@ -99,4 +99,3 @@ record EffectiveBoundedJoinSemilattice c ℓ₁ ℓ₂ : Set (Level.suc (c ⊔ �
     least x fx≈x =  ≤-respʳ-≈ fⁿx≈x fⁿ⊥≲fⁿx  where
       fⁿ⊥≲fⁿx = iter-mono f f-is-monotone height ⊥ x (minimum x)
       fⁿx≈x = iter-fixed f isEquivalence Eq.isRelHomomorphism height x fx≈x
-

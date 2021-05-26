@@ -48,7 +48,7 @@ module Show where
   show-list-with-sep show sep (x ∷ x' ∷ xs) = show x ++ sep ++ show-list-with-sep show sep (x' ∷ xs)
 
   concat-with : String → List String → String
-  concat-with s ss = show-list-with-sep (λ s → s) s ss
+  concat-with s ss = show-list-with-sep (Function.id) s ss
 
   concat-with-space : List String → String
   concat-with-space = concat-with " "
@@ -56,6 +56,34 @@ module Show where
   concat-with-colon : List String → String
   concat-with-colon = concat-with ": "
 
+  concat-with-comma : List String → String
+  concat-with-comma = concat-with ", "
+
+
+module _ where
+  open Relation.Binary
+  open import Data.Product
+  open import Data.Maybe
+
+  record Lens (S A : Set) : Set where
+    field
+      view : S → A
+      update : S → A → S
+
+  record LensProp (S A : Set) (l : Lens S A) (_~S_ : Rel S Level.zero) (_~A_ : Rel A Level.zero) : Set where
+    open Lens l
+    field
+      view-update : ∀ s → ∀ a → view (update s a) ~A a
+      update-view : ∀ s → update s (view s) ~S s
+      update-update : ∀ s → ∀ a a' → update (update s a) a' ~S update s a'
+
+  prod-fst : ∀{A B} → Lens (A × B) A
+  Lens.view prod-fst = proj₁
+  Lens.update prod-fst (fst , snd) = λ new → (new , snd)
+
+  idlens : ∀{S : Set} → Lens S S
+  Lens.view idlens = Function.id
+  Lens.update idlens = Function.const Function.id
 
 module Syntax where
   open Product
@@ -84,24 +112,51 @@ module Syntax where
       nat : ℕ → val
       unit : ⊤ → val
 
-    data insn : Set where
-      const : val → insn
-      nop : insn
-      not : insn
-      and : insn
-      add : insn
-      sub : insn
-      eqz : insn
-      dup : insn
-      drop : insn
-      store : insn
-      load : insn
-      block : functype → List insn → insn
-      if-else : functype → List insn → List insn → insn
-      loop : functype → List insn → insn
-      br : ℕ → insn
-      br-if : ℕ → insn
-  
+    data insn : Set
+    data n-insn : Set where
+        n-const : val → n-insn
+        n-not : n-insn
+        n-and : n-insn
+        n-add : n-insn
+        n-sub : n-insn
+        n-eqz : n-insn
+        n-dup : n-insn
+        n-drop : n-insn
+
+    data m-insn : Set where
+        m-store : m-insn
+        m-load : m-insn
+
+    data c-insn : Set where
+        c-block : functype → List insn → c-insn
+        c-if-else : functype → List insn → List insn → c-insn
+        c-loop : functype → List insn → c-insn
+        c-br : ℕ → c-insn
+        c-br-if : ℕ → c-insn
+
+    data insn where
+        nop : insn
+        numeric : n-insn → insn
+        control : c-insn → insn
+        memory : m-insn → insn
+
+    pattern const x = numeric (n-const x)
+    pattern not = numeric n-not
+    pattern and = numeric n-and
+    pattern add = numeric n-add
+    pattern sub = numeric n-sub
+    pattern eqz = numeric n-eqz
+    pattern dup = numeric n-dup
+    pattern drop = numeric n-drop
+    pattern block t is = control (c-block t is)
+    pattern if-else t is is' = control (c-if-else t is is')
+    pattern loop t is = control (c-loop t is)
+    pattern br n = control (c-br n)
+    pattern br-if n = control (c-br-if n)
+    pattern store = memory m-store
+    pattern load = memory m-load
+
+
     vals : Set
     vals = List val
 
@@ -114,15 +169,19 @@ module Syntax where
 
     frames = List frame
 
-    record memory : Set where
+    record mem : Set where
       field
         limit : ℕ
-        mem : Vec.Vec ℕ limit
+        assign : ℕ → ℕ
 
-    initmem : memory
-    initmem = record {limit = 0; mem = Vec.[]}
+    initmem : mem
+    initmem = record {limit = 0; assign = λ _ → 0}
 
-    config = frames × vals × insns × memory
+    count = ℕ
+
+    config = mem × frames × vals × insns
+
+    memarg = ℕ -- offset
 
   module _ where
     open String
@@ -150,31 +209,30 @@ module Syntax where
     show-functype : functype → String
     show-functype (a ⇒ b) = show-resulttype a ++ "⇒" ++ show-resulttype b
 
-    mutual
-      show-insns : insns → String
-      show-insns is = "[" ++ go is ++ "]" where
-        go : insns → String
-        go [] = ""
-        go (i ∷ []) = show-insn i
-        go (i ∷ is) = show-insn i ++ " " ++ show-insns is
+    show-insn : insn → String
+    show-insns : insns → String
+    show-insns is = "[" ++ go is ++ "]" where
+      go : insns → String
+      go [] = ""
+      go (i ∷ []) = show-insn i
+      go (i ∷ is) = show-insn i ++ " " ++ show-insns is
 
-      show-insn : insn → String
-      show-insn (const n) = concat-with-space ("const" ∷ show-val n ∷ [])
-      show-insn nop = "nop"
-      show-insn not = "not"
-      show-insn and = "and"
-      show-insn add = "add"
-      show-insn sub = "sub"
-      show-insn eqz = "eqz"
-      show-insn dup = "dup"
-      show-insn drop = "drop"
-      show-insn store = "store"
-      show-insn load = "load"
-      show-insn (block ft is) = concat-with-space ("block" ∷ show-functype ft ∷ show-insns is ∷ [])
-      show-insn (if-else ft ist isf) = concat-with-space ("if" ∷ show-functype ft ∷ show-insns ist ∷ show-insns isf ∷ [])
-      show-insn (loop ft is) = concat-with-space ("loop" ∷ show-functype ft ∷ show-insns is ∷ [])
-      show-insn (br n) = concat-with-space ("br" ∷ NS.show n ∷ [])
-      show-insn (br-if n) = concat-with-space ("br-if" ∷ NS.show n ∷ [])
+    show-insn (const v) = concat-with-space ("const" ∷ show-val v ∷ [])
+    show-insn nop = "nop"
+    show-insn not = "not"
+    show-insn and = "and"
+    show-insn add = "add"
+    show-insn sub = "sub"
+    show-insn eqz = "eqz"
+    show-insn dup = "dup"
+    show-insn drop = "drop"
+    show-insn store = "store"
+    show-insn load = "load"
+    show-insn (block ft is) = concat-with-space ("block" ∷ show-functype ft ∷ show-insns is ∷ [])
+    show-insn (if-else ft ist isf) = concat-with-space ("if" ∷ show-functype ft ∷ show-insns ist ∷ show-insns isf ∷ [])
+    show-insn (loop ft is) = concat-with-space ("loop" ∷ show-functype ft ∷ show-insns is ∷ [])
+    show-insn (br n) = concat-with-space ("br" ∷ NS.show n ∷ [])
+    show-insn (br-if n) = concat-with-space ("br-if" ∷ NS.show n ∷ [])
 
     show-frame : frame → String
     show-frame (vs , a , l , is) = show-vals vs ++ "ℓ" ++ NS.show a ++ "{" ++ show-insns l ++ "}" ++ "*" ++ show-insns is
@@ -182,8 +240,15 @@ module Syntax where
     show-frames : frames → String
     show-frames fs = "[" ++ show-list-with-sep show-frame " " fs ++ "]"
 
+    show-mem : mem → String
+    show-mem m = concat-with-comma (go (mem.limit m) (mem.assign m) Nat.zero) where
+      open Nat
+      go : ℕ → (ℕ → ℕ) → ℕ → List String
+      go zero ass i = []
+      go (suc n) ass i = (NS.show i ++ " ↦ " ++ NS.show (ass i)) ∷ go n ass (suc i)
+
     show-config : config → String
-    show-config (fs , vs , is , mem) = "(" ++ show-frames fs ++ ", " ++ show-vals vs ++ ", " ++ show-insns is ++ ")"
+    show-config (m , fs , vs , is) = "(" ++ show-frames fs ++ ", " ++ show-vals vs ++ ", " ++ show-insns is ++ ")"
 
 module Equality where
   open import Relation.Binary
@@ -215,51 +280,39 @@ module InterpreterCore where
   open Product
   open Unit
   open Function
-  data result (S : Set) : Set where
-    ok : S → result S
-    error : String → result S
+  data Err (S : Set) : Set where
+    ok : S → Err S
+    error : String → Err S
 
-  bind : ∀{A B} → result A → (A → result B) → result B
+  bind : ∀{A B} → Err A → (A → Err B) → Err B
   bind (ok x) f = f x
   bind (error x) _ = error x
 
-  resultMonad : RawMonad result
-  resultMonad = record
+  ErrMonad : RawMonad Err
+  ErrMonad = record
     { return = ok
     ; _>>=_ = bind
     }
 
   open Category.Monad.State
 
-  state-machine : Set → Set → Set
-  state-machine S = IStateT (λ _ → S) result tt tt
+--   StErr' : Set → Set → Set 
 
-  state-machine-result : Set → Set → Set
-  state-machine-result S X = result (X × S)
+  StErr : Set → Set → Set
+  StErr S = IStateT (λ _ → S) Err tt tt
 
-  state-machine-monad : ∀ (S : Set) → RawMonad (state-machine S)
-  state-machine-monad S = StateTIMonad (λ _ → S) resultMonad
-
-  lift-result : ∀{S X} → result X → state-machine S X
-  lift-result x s = do
-    v ← x
-    ok (v , s)
-    where open RawMonad resultMonad
+  StErrMonad : ∀ (S : Set) → RawMonad (StErr S)
+  StErrMonad S = StateTIMonad (λ _ → S) ErrMonad
 
   pattern ok' a = ok (tt , a)
 
-  record subconfig (S : Set) (S' : Set) : Set where
-    field
-      view : S → S'
-      update : S → S' → S
-      eq : ∀(x : S) → update x (view x) PropositionalEquality.≡ x
-
-  upgrade : {S' S X : Set} → (subconfig S S') → state-machine S' X → state-machine S X
-  upgrade {S'} r ms' s = do
-    x , t' ← ms' (view s)
+  zoom : {S' S X : Set} → (Lens S S') → StErr S' X → StErr S X
+  zoom {S'} lens ms' = λ s → do
+    (x , t') ← ms' (view s)
     return $ x , update s t'
-    where open subconfig r
-          open RawMonad resultMonad
+    where open Lens lens
+          open RawMonad ErrMonad
+  
 
 feqz : Nat.ℕ → Bool.Bool
 feqz 0 = Bool.true
@@ -286,22 +339,21 @@ module Interpreter where
   interp-valtype nat = ℕ
   interp-valtype unit = ⊤
 
-  module _ where
-    non-framed = state-machine (vals × insns)
-    non-framed-result = state-machine-result (vals × insns)
-    result-non-framed = result (vals × insns)
+  module Numeric where
+    subconfig = vals
+    private
+      M = StErr (subconfig)
 
-    module non-framed-M = RawMonad (state-machine-monad (vals × insns))
-    open non-framed-M
+    open RawMonad (StErrMonad (subconfig))
 
-    push : val → non-framed ⊤
-    push v (vs , is) = ok' ((v ∷ vs) , is) 
+    push : val → M ⊤
+    push v vs = ok' (v ∷ vs)
 
-    pop : non-framed val
-    pop (v ∷ vs , is) = ok (v , vs , is)
+    pop : M val
+    pop (v ∷ vs) = ok (v , vs)
     pop _ = error "value stack underflow"
-  
-    chkval : (t : valtype) → val → non-framed (interp-valtype t)
+
+    chkval : (t : valtype) → val → M (interp-valtype t)
     chkval bool (bool b) = return b
     chkval nat (nat n) = return n
     chkval unit (unit tt) = return tt
@@ -311,160 +363,190 @@ module Interpreter where
             actual (nat _) = nat
             actual (unit _) = unit
   
-    popchk : (t : valtype) → non-framed (interp-valtype t)
+    popchk : (t : valtype) → M (interp-valtype t)
     popchk t = pop >>= chkval t
+    
+    einsn : n-insn → M ⊤
+    einsn (n-const v) = do push v
+    einsn n-and = do
+      x ← popchk bool
+      y ← popchk bool
+      push $ bool $ x ∧ y
+    einsn n-not = do
+      x ← popchk bool
+      push $ bool $ Bool.not x
+    einsn n-add = do
+      x ← popchk nat
+      y ← popchk nat
+      push $ nat ( x + y )
+    einsn n-sub = do
+      x ← popchk nat
+      y ← popchk nat
+      push $ nat ( x ∸ y )
+    einsn n-eqz = do
+      n ← popchk nat
+      push $ bool (feqz n)
+    einsn n-dup = do
+      v ← pop
+      push v
+      push v
+    einsn n-drop = do
+      pop
+      return tt
   
-    fetch : non-framed insn
-    fetch (vs , (i ∷ is)) = ok (i , vs , is)
-    fetch _ = error "no instuction to fetch"
-
+  module Control where
   
-    emit : insn → non-framed ⊤
-    emit i (vs , is) = ok' (vs , i ∷ is)
-  
-    module NonFramed where
-      einsn : insn → non-framed ⊤
-      einsn (const v) = do push v
-      einsn nop = return tt
-      einsn and = do
-        x ← popchk bool
-        y ← popchk bool
-        push $ bool $ x ∧ y
-      einsn not = do
-        x ← popchk bool
-        push $ bool $ Bool.not x
-      einsn add = do
-        x ← popchk nat
-        y ← popchk nat
-        push $ nat ( x + y )
-      einsn sub = do
-        x ← popchk nat
-        y ← popchk nat
-        push $ nat ( x ∸ y )
-      einsn eqz = do
-        n ← popchk nat
-        push $ bool (feqz n)
-      einsn dup = do
-        v ← pop
-        push v
-        push v
-      einsn drop = do
-        pop
-        return tt
-      einsn _ _ = error "illegal instruction"
-  
-      eistep : non-framed ⊤
-      eistep s@(v , []) = ok' s
-      eistep s@(v , i ∷ is) = (fetch >>= einsn) s
+    subconfig = frames × vals × insns
+    M = StErr subconfig
 
+    open RawMonad (StErrMonad subconfig)
 
-  module _ where
-    framed = state-machine (frames × vals × insns)
-    framed-result = state-machine-result (frames × vals × insns)
-    module framed-M = RawMonad (state-machine-monad (frames × vals × insns))
-    open framed-M 
+    zoom' : {X : Set} → StErr vals X → StErr subconfig X
+    zoom' m = zoom lens m where
+      lens : Lens subconfig Numeric.subconfig
+      Lens.view lens (fs , vs , is) = vs
+      Lens.update lens (fs , vs , is) vs' = (fs , vs' , is)
 
-    lift : ∀{X : Set} → non-framed X → framed X
-    lift {X} nf (fs , vs , is) = f (nf (vs , is))
-      where f : non-framed-result X → framed-result X
-            f (ok (x , s)) = ok (x , fs , s)
-            f (error e) = (error e)
-
-    prepend : insns → framed ⊤
-    prepend is' (fs , vs , is) = ok' (fs , vs , is' ++ is)
-
-    append : vals → framed ⊤
+    append : vals → M ⊤
     append vs' (fs , vs , is) = ok' (fs , vs' ++ vs , is)
 
-    split : ℕ → framed vals
+    split : ℕ → M vals
     split n (fs , vs , is) = ok (take n vs , fs , List.drop n vs , is)
   
-    vswap : vals → framed vals
-    vswap vs (fs , vs' , is) = ok (vs' , fs , vs , is)
+    swap-insns : insns → M insns
+    swap-insns is (fs , vs , is') = ok (is' , fs , vs , is)
 
-    enter : frame → framed ⊤
+    enter : frame → M ⊤
     enter (vs' , a , l , is') (fs , vs , is) = ok' ((vs , a , l , is) ∷ fs , vs' , is')
   
-    lookup-label-nargs : ℕ → framed ℕ
+    lookup-label-nargs : ℕ → M ℕ
     lookup-label-nargs l st@(fs , _ , _) with List.head (List.drop l fs)
     ...                               | Maybe.just (_ , a , _ , _)  = ok (a , st)
     ...                               | Maybe.nothing = error "jump terget does not exist"
   
-    leave : framed frame
+    leave : M frame
     leave ((vs , a , l , is) ∷ fs , vs' , is') = ok ((vs' , a , l , is') , fs , vs , is)
     leave _ = error "control stack underflow"
   
-    br-helper : ℕ → framed ⊤
+    br-helper : ℕ → M ⊤
     br-helper n (fs , vs , _) with List.drop n fs
     ... | [] = error "branch to outside" 
     ... | (vs' , m , lis , cis) ∷ fs' = ok' (fs' , (take m vs) ++ vs' , lis ++ cis)
 
+    popchk : (t : valtype) → M (interp-valtype t)
+    popchk x = zoom' (Numeric.popchk x)
 
-    {-
-    br-helper zero = do
-      (vs , n , lcont , _) ← leave
-      prepend lcont
-      append (take n vs)
-    br-helper (suc m) = do
-      (vs , _ , _ , _) ← leave
-      vswap vs
-      br-helper m
-    -}
-  
-    einsn : insn → framed ⊤
-    einsn (block (a ⇒ b) is) = do
+    einsn : c-insn → M ⊤
+    einsn (c-block (a ⇒ b) is) = do
       vs ← split (length a)
       enter (vs , length b , [] , is)
-    einsn (if-else (a ⇒ b) ist isf) = do
-      p ← lift (popchk bool)
+    einsn (c-if-else (a ⇒ b) ist isf) = do
+      p ← popchk bool
       vs ← split (length a)
       if p then enter (vs , length b , [] , ist)
            else enter (vs , length b , [] , isf)
-    einsn (loop (a ⇒ b) is) = do
+    einsn (c-loop (a ⇒ b) is) = do
       vs ← split (length a)
       enter (vs , length a , loop (a ⇒ b) is ∷ [] , is)
   
-    einsn (br n) = do
+    einsn (c-br n) = do
       br-helper n
   
-    einsn (br-if n) = lift (popchk bool) >>= λ where
+    einsn (c-br-if n) = popchk bool >>= λ where
         false → return tt
         true → br-helper n
 
-    einsn i = lift (NonFramed.einsn i)
-
-    eend : framed ⊤
+    eend : M ⊤
     eend = do
       vs , _ , _ , _ ← leave
       append vs
 
-    eifstep : framed ⊤
-    eifstep = lift fetch >>= einsn
- 
-    estep : framed ⊤
-    estep (fs , vs , br n ∷ is) = eifstep (fs , vs , br n ∷ is)
-    estep (fs , vs , nop ∷ is) = (lift NonFramed.eistep) (fs , vs , nop ∷ is)
-    estep (fs , vs , const v ∷ is) = (lift NonFramed.eistep) (fs , vs , insn.const v ∷ is)
-    estep (fs , vs , and ∷ is) = (lift NonFramed.eistep) (fs , vs , and ∷ is)
-    estep (fs , vs , not ∷ is) = (lift NonFramed.eistep) (fs , vs , not ∷ is)
-    estep (fs , vs , add ∷ is) = (lift NonFramed.eistep) (fs , vs , add ∷ is)
-    estep (fs , vs , sub ∷ is) = (lift NonFramed.eistep) (fs , vs , sub ∷ is)
-    estep (fs , vs , eqz ∷ is) = (lift NonFramed.eistep) (fs , vs , eqz ∷ is)
-    estep (fs , vs , dup ∷ is) = (lift NonFramed.eistep) (fs , vs , dup ∷ is)
-    estep (fs , vs , drop ∷ is) = (lift NonFramed.eistep) (fs , vs , insn.drop ∷ is)
-    estep (fs , vs , block t is' ∷ is) = eifstep (fs , vs , block t is' ∷ is)
-    estep (fs , vs , if-else t is' is'' ∷ is) = eifstep (fs , vs , if-else t is' is'' ∷ is)
-    estep (fs , vs , loop t is' ∷ is) = eifstep (fs , vs , loop t is' ∷ is)
-    estep (fs , vs , br-if n ∷ is) = eifstep (fs , vs , br-if n ∷ is)
-    estep ([] , vs , []) = ok' ([] , vs , [])
-    estep (f ∷ fs , vs , []) = eend (f ∷ fs , vs , [])
-    estep _ = {!!}
+  module Memory where
+    open Decidable
+    subconfig = mem × vals
+    M = StErr subconfig
+
+    zoom' : {X : Set} → StErr vals X → StErr subconfig X
+    zoom' m = zoom lens m where
+      lens : Lens subconfig Numeric.subconfig
+      Lens.view lens (m , vs) = vs
+      Lens.update lens (m , vs) vs' = (m , vs')
+
+    upd-assign : ℕ → ℕ → (ℕ → ℕ) → ℕ → ℕ
+    upd-assign i v m i' = if isYes (i Nat.≟ i') then v else m i'
+
+    open RawMonad (StErrMonad subconfig)
+    write : ℕ → ℕ → M ⊤
+    write i n (old  , vs) = if isYes (i Nat.<? mem.limit old)
+      then ok' (new , vs)
+      else error "memory write outside limit" where
+        new : mem
+        mem.limit new = mem.limit old
+        mem.assign new = upd-assign i n (mem.assign old)
+    read : ℕ → M ℕ
+    read i (m , vs) = ok (mem.assign m i , m , vs)
+
+    open Relation.Binary
+    open import Relation.Binary.PropositionalEquality
+    _~_ : Rel mem Level.zero
+    m ~ m' = (i : ℕ) → (i Nat.< mem.limit m) → mem.assign m i ≡ mem.assign m' i  
+
+
+    popchk : (t : valtype) → M (interp-valtype t)
+    popchk t = zoom' (Numeric.popchk t)
+
+    push : val → M ⊤
+    push v = zoom' (Numeric.push v)
+
+    einsn : m-insn → M ⊤
+    einsn m-load = do
+      ea ← popchk nat
+      v ← read ea
+      push (nat v)
+    einsn m-store = do
+      v ← popchk nat
+      ea ← popchk nat
+      write ea v
+
+
+  fromNumeric : ∀{X} → StErr Numeric.subconfig X → StErr config X
+  fromNumeric = zoom lens where
+    lens : Lens config Numeric.subconfig 
+    Lens.view   lens (m , fs , vs , is) = vs
+    Lens.update lens (m , fs , vs , is) vs' = (m , fs , vs' , is)
+
+  fromControl : ∀{X} → StErr Control.subconfig X → StErr config X
+  fromControl = zoom lens where
+    lens : Lens config Control.subconfig 
+    Lens.view   lens (m , fs , vs , is) = (fs , vs , is)
+    Lens.update lens (m , fs , vs , is) (fs' , vs' , is') = (m , fs' , vs' , is')
+
+  fromMemory : ∀{X} → StErr Memory.subconfig X → StErr config X
+  fromMemory = zoom lens where
+    lens : Lens config Memory.subconfig
+    Lens.view   lens (m , fs , vs , is) = (m , vs)
+    Lens.update lens (m , fs , vs , is) (m' , vs') = (m' , fs , vs' , is)
+
+  module _ where
+    open RawMonad (StErrMonad config)
+
+    einsn : insn → StErr config ⊤
+    einsn nop = return tt
+    einsn (numeric i) = fromNumeric (Numeric.einsn i)
+    einsn (control i) = fromControl (Control.einsn i)
+    einsn (memory i) = fromMemory (Memory.einsn i)
+
+    estep : StErr config ⊤
+    estep (m , fs , vs , i ∷ is) = einsn i (m , fs , vs , is)
+    estep (m , [] , vs , []) = ok' (m , [] , vs , [])
+    estep (m , f ∷ fs , vs , []) = fromControl Control.eend (m , fs , vs , [])
+
     -- pattern matching for `fs` (the cases for `[]` and `f ∷ fs`) must be here on the bottom of the cases, and you can not place it to the beginning of the function definition.
     -- Otherwise, in the proof of safety, agda requires patttarn-matching on `fs` to normalize the term in any other case, and `estep (fs , vs , br n)` won't be able to normalize `eifstep ...` in a natural way.
     -- This is caused by difference in case tree
-   
-    estepn : ℕ → framed ⊤
-    estepn zero ([] , vs , []) = ok' ([] , vs , [])
+
+    estepn : ℕ → StErr config ⊤
+    estepn zero (m , [] , vs , []) = ok' (m , [] , vs , [])
     estepn zero _ = error "timeout"
     estepn (suc n) = estep >> estepn n
 
@@ -480,22 +562,22 @@ module Example where
   open Show
 
   ex0 ex1 ex2 ex3 ex4 ex5 ex6 ex7 ex8 : config
-  ex0 = ([] , (nat 1 ∷ nat 2 ∷ []) , (add ∷ []), initmem)
-  ex1 = ([] , (bool true ∷ nat 1 ∷ nat 0 ∷ []) , ( not ∷ (if-else (nat ∷ nat ∷ [] ⇒ [ nat ]) [ add ] [ drop ]) ∷ []) , initmem)
-  ex2 = ([] , [] , (block ([] ⇒ [ nat ]) (const (nat 1) ∷ block ([ nat ] ⇒ [ nat ]) (br 1 ∷ []) ∷ []) ∷ []) , initmem)
-  ex3 = ([] , [] , (drop ∷ []) , initmem)
-  ex4 = ([] , [] , (loop ([] ⇒ nat ∷ nat ∷ []) ([ br 0 ])) ∷ [] , initmem)
-  ex5 = ([] , [] , block ([] ⇒ [ nat ]) (const (nat 1) ∷ []) ∷ [] , initmem)
-  ex6 = ([] , bool true ∷ bool true ∷ [] , and ∷ [] , initmem)
-  ex7 = ([] , bool true ∷ bool true ∷ [] , add ∷ [] , initmem)
-  ex8 = ([] , nat 1 ∷ [] , block (nat ∷ [] ⇒ bool ∷ []) (const (nat 1) ∷ block (nat ∷ [] ⇒ []) (const (bool true) ∷ br 1 ∷ []) ∷ []) ∷ [] , initmem)
+  ex0 = (initmem , [] , (nat 1 ∷ nat 2 ∷ []) , (add ∷ []))
+  ex1 = (initmem , [] , (bool true ∷ nat 1 ∷ nat 0 ∷ []) , ( not ∷ (if-else (nat ∷ nat ∷ [] ⇒ [ nat ]) [ add ] [ drop ]) ∷ []))
+  ex2 = (initmem , [] , [] , (block ([] ⇒ [ nat ]) (const (nat 1) ∷ block ([ nat ] ⇒ [ nat ]) (br 1 ∷ []) ∷ []) ∷ []))
+  ex3 = (initmem , [] , [] , (drop ∷ []))
+  ex4 = (initmem , [] , [] , (loop ([] ⇒ nat ∷ nat ∷ []) ([ br 0 ])) ∷ [])
+  ex5 = (initmem , [] , [] , block ([] ⇒ [ nat ]) (const (nat 1) ∷ []) ∷ [])
+  ex6 = (initmem , [] , bool true ∷ bool true ∷ [] , and ∷ [])
+  ex7 = (initmem , [] , bool true ∷ bool true ∷ [] , add ∷ [])
+  ex8 = (initmem , [] , nat 1 ∷ [] , block (nat ∷ [] ⇒ bool ∷ []) (const (nat 1) ∷ block (nat ∷ [] ⇒ []) (const (bool true) ∷ br 1 ∷ []) ∷ []) ∷ [])
 
-  show-result : result (⊤ × config) → String
+  show-result : Err (⊤ × config) → String
   show-result (ok' st) = concat-with-colon (show-config st ∷ [])
   show-result (error emesg) = concat-with-colon ("error" ∷ emesg ∷ [])
 
   show-eval : config → String
-  show-eval ex = show-config ex ++ " ↪* " ++ show-result {!!} -- (estepn 1024 ex)
+  show-eval ex = show-config ex ++ " ↪* " ++ show-result (estepn 1024 ex)
 
   run : List String
   run = (List.map show-eval (ex0 ∷ ex1 ∷ ex2 ∷ ex3 ∷ ex4 ∷ ex5 ∷ ex6 ∷ ex7 ∷ ex8 ∷ []))
