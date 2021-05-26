@@ -126,6 +126,7 @@ module Syntax where
     data m-insn : Set where
         m-store : m-insn
         m-load : m-insn
+        m-grow : m-insn
 
     data c-insn : Set where
         c-block : functype → List insn → c-insn
@@ -155,6 +156,7 @@ module Syntax where
     pattern br-if n = control (c-br-if n)
     pattern store = memory m-store
     pattern load = memory m-load
+    pattern grow = memory m-grow
 
 
     vals : Set
@@ -233,6 +235,7 @@ module Syntax where
     show-insn (loop ft is) = concat-with-space ("loop" ∷ show-functype ft ∷ show-insns is ∷ [])
     show-insn (br n) = concat-with-space ("br" ∷ NS.show n ∷ [])
     show-insn (br-if n) = concat-with-space ("br-if" ∷ NS.show n ∷ [])
+    show-insn grow = "grow"
 
     show-frame : frame → String
     show-frame (vs , a , l , is) = show-vals vs ++ "ℓ" ++ NS.show a ++ "{" ++ show-insns l ++ "}" ++ "*" ++ show-insns is
@@ -241,14 +244,14 @@ module Syntax where
     show-frames fs = "[" ++ show-list-with-sep show-frame " " fs ++ "]"
 
     show-mem : mem → String
-    show-mem m = concat-with-comma (go (mem.limit m) (mem.assign m) Nat.zero) where
+    show-mem m = "{" ++ concat-with-comma (go (mem.limit m) (mem.assign m) Nat.zero) ++ "}"where
       open Nat
       go : ℕ → (ℕ → ℕ) → ℕ → List String
       go zero ass i = []
       go (suc n) ass i = (NS.show i ++ " ↦ " ++ NS.show (ass i)) ∷ go n ass (suc i)
 
     show-config : config → String
-    show-config (m , fs , vs , is) = "(" ++ show-frames fs ++ ", " ++ show-vals vs ++ ", " ++ show-insns is ++ ")"
+    show-config (m , fs , vs , is) = "(" ++ concat-with-comma (show-mem m ∷ show-frames fs ∷ show-vals vs ∷ show-insns is ∷ []) ++ ")"
 
 module Equality where
   open import Relation.Binary
@@ -418,12 +421,7 @@ module Interpreter where
 
     enter : frame → M ⊤
     enter (vs' , a , l , is') (fs , vs , is) = ok' ((vs , a , l , is) ∷ fs , vs' , is')
-  
-    lookup-label-nargs : ℕ → M ℕ
-    lookup-label-nargs l st@(fs , _ , _) with List.head (List.drop l fs)
-    ...                               | Maybe.just (_ , a , _ , _)  = ok (a , st)
-    ...                               | Maybe.nothing = error "jump terget does not exist"
-  
+    
     leave : M frame
     leave ((vs , a , l , is) ∷ fs , vs' , is') = ok ((vs' , a , l , is') , fs , vs , is)
     leave _ = error "control stack underflow"
@@ -465,6 +463,7 @@ module Interpreter where
     open Decidable
     subconfig = mem × vals
     M = StErr subconfig
+    open RawMonad (StErrMonad subconfig)
 
     zoom' : {X : Set} → StErr vals X → StErr subconfig X
     zoom' m = zoom lens m where
@@ -472,19 +471,40 @@ module Interpreter where
       Lens.view lens (m , vs) = vs
       Lens.update lens (m , vs) vs' = (m , vs')
 
-    upd-assign : ℕ → ℕ → (ℕ → ℕ) → ℕ → ℕ
-    upd-assign i v m i' = if isYes (i Nat.≟ i') then v else m i'
+    getmem : M mem
+    getmem (m , vs) = ok (m , m , vs)
 
-    open RawMonad (StErrMonad subconfig)
+    setmem : mem → M ⊤
+    setmem new (old , vs') = ok' (new , vs')
+
+    chklimit : ℕ → mem → Bool
+    chklimit i m = let open mem m in isYes (i Nat.<? limit)
+    
+    reassign : ℕ → ℕ → mem → mem
+    reassign i v m = record
+      { limit = limit
+      ; assign = λ i' → if isYes (i' Nat.≟ i) then v else assign i
+      } where open mem m
+
+    growmem : ℕ → mem → ℕ × mem
+    growmem i m = limit , record
+      { limit = limit + i
+      ; assign = assign -- Maybe we need an explicit zero clear
+      } where open mem m
+
     write : ℕ → ℕ → M ⊤
-    write i n (old  , vs) = if isYes (i Nat.<? mem.limit old)
-      then ok' (new , vs)
-      else error "memory write outside limit" where
-        new : mem
-        mem.limit new = mem.limit old
-        mem.assign new = upd-assign i n (mem.assign old)
+    write i v = do
+      m ← getmem
+      true ← return (chklimit i m) where
+        false → λ _ → error "write access out of range"
+      setmem (reassign i v m)
+
     read : ℕ → M ℕ
-    read i (m , vs) = ok (mem.assign m i , m , vs)
+    read i = do
+      m ← getmem
+      true ← return (chklimit i m) where
+        false → λ _ → error "read access out of range"
+      return (mem.assign m i)
 
     open Relation.Binary
     open import Relation.Binary.PropositionalEquality
@@ -507,6 +527,13 @@ module Interpreter where
       v ← popchk nat
       ea ← popchk nat
       write ea v
+
+    einsn m-grow = do
+      n ← popchk nat
+      m ← getmem
+      let (n' , m') = growmem n m
+      setmem m'
+      push (nat n')
 
 
   fromNumeric : ∀{X} → StErr Numeric.subconfig X → StErr config X
