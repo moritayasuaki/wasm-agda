@@ -115,6 +115,7 @@ module Syntax where
     data insn : Set
     data n-insn : Set where
         n-const : val → n-insn
+        n-nop : n-insn
         n-not : n-insn
         n-and : n-insn
         n-add : n-insn
@@ -136,12 +137,12 @@ module Syntax where
         c-br-if : ℕ → c-insn
 
     data insn where
-        nop : insn
         numeric : n-insn → insn
         control : c-insn → insn
         memory : m-insn → insn
 
     pattern const x = numeric (n-const x)
+    pattern nop = numeric n-nop
     pattern not = numeric n-not
     pattern and = numeric n-and
     pattern add = numeric n-add
@@ -309,10 +310,17 @@ module InterpreterCore where
 
   pattern ok' a = ok (tt , a)
 
+  zoomE : {S' S X : Set} → (Lens S S') → S → Err (X × S') → Err (X × S)
+  zoomE lens s ms' = do
+    (x , s') ← ms'
+    return $ x , update s s'
+    where open Lens lens
+          open RawMonad ErrMonad
+
   zoom : {S' S X : Set} → (Lens S S') → StErr S' X → StErr S X
-  zoom {S'} lens ms' = λ s → do
-    (x , t') ← ms' (view s)
-    return $ x , update s t'
+  zoom lens ms' = λ s → do
+    (x , s') ← ms' (view s)
+    return $ x , update s s'
     where open Lens lens
           open RawMonad ErrMonad
   
@@ -370,6 +378,7 @@ module Interpreter where
     popchk t = pop >>= chkval t
     
     einsn : n-insn → M ⊤
+    einsn n-nop = ok'
     einsn (n-const v) = do push v
     einsn n-and = do
       x ← popchk bool
@@ -454,10 +463,8 @@ module Interpreter where
         false → return tt
         true → br-helper n
 
-    eend : M ⊤
-    eend = do
-      vs , _ , _ , _ ← leave
-      append vs
+    eend : frame → M ⊤
+    eend (vs , _ , _ , is) (fs , vs' , _) = ok' (fs , vs' ++ vs , is)
 
   module Memory where
     open Decidable
@@ -548,6 +555,12 @@ module Interpreter where
     Lens.view   lens (m , fs , vs , is) = (fs , vs , is)
     Lens.update lens (m , fs , vs , is) (fs' , vs' , is') = (m , fs' , vs' , is')
 
+  fromControlE : ∀{X} → config → Err (X × Control.subconfig) → Err (X × config)
+  fromControlE c = zoomE lens c where
+    lens : Lens config Control.subconfig 
+    Lens.view   lens (m , fs , vs , is) = (fs , vs , is)
+    Lens.update lens (m , fs , vs , is) (fs' , vs' , is') = (m , fs' , vs' , is')
+
   fromMemory : ∀{X} → StErr Memory.subconfig X → StErr config X
   fromMemory = zoom lens where
     lens : Lens config Memory.subconfig
@@ -565,8 +578,9 @@ module Interpreter where
 
     estep : StErr config ⊤
     estep (m , fs , vs , i ∷ is) = einsn i (m , fs , vs , is)
-    estep (m , [] , vs , []) = ok' (m , [] , vs , [])
-    estep (m , f ∷ fs , vs , []) = fromControl Control.eend (m , fs , vs , [])
+    estep (m , fs' , vs , []) with fs'
+    ... | [] = ok' (m , [] , vs , [])
+    ... | f ∷ fs = fromControl (Control.eend f) (m , fs , vs , [])
 
     -- pattern matching for `fs` (the cases for `[]` and `f ∷ fs`) must be here on the bottom of the cases, and you can not place it to the beginning of the function definition.
     -- Otherwise, in the proof of safety, agda requires patttarn-matching on `fs` to normalize the term in any other case, and `estep (fs , vs , br n)` won't be able to normalize `eifstep ...` in a natural way.

@@ -90,8 +90,26 @@ module Typing where
     [] : [] :-vs []
     _∷_ : ∀{t ts v vs} → v :-v t → vs :-vs ts → v ∷ vs :-vs t ∷ ts
 
-  mutual
-    data _:-i_ : insn → lfunctype → Set where
+  module Numeric where
+    infix 2 _:-i_
+    data _:-i_ : n-insn → functype → Set
+
+    data _:-i_ where
+      tn-const : ∀{t v} → v :-v t → n-const v :-i [] ⇒ t ∷ []
+      tn-nop : n-nop :-i bool ∷ [] ⇒ bool ∷ []
+      tn-not : n-not :-i bool ∷ bool ∷ [] ⇒ bool ∷ []
+      tn-and : n-and :-i bool ∷ bool ∷ [] ⇒ bool ∷ []
+      tn-add : n-add :-i nat ∷ nat ∷ [] ⇒ nat ∷ []
+      tn-sub : n-sub :-i nat ∷ nat ∷ [] ⇒ nat ∷ []
+      tn-eqz : n-eqz :-i nat ∷ [] ⇒ bool ∷ []
+      tn-dup : ∀{t} → n-dup :-i t ∷ [] ⇒ t ∷ t ∷ []
+      tn-drop : ∀{t} → n-drop :-i t ∷ [] ⇒ []
+  
+  data _:-is_ : insns → lfunctype → Set
+  data _:-i_ : insn → lfunctype → Set
+  _:-i'_ : insn → lfunctype → Set
+
+  data _:-i_ where
       tconst : ∀{t v p} → v :-v t → const v :-i [] ⇒ t ∷ [] / p
       tnop : ∀{p} → nop :-i [] ⇒ [] / p
       tnot : ∀{p} → not :-i bool ∷ [] ⇒ bool ∷ [] / p
@@ -122,15 +140,14 @@ module Typing where
              → n ≡ length q
              → br-if n :-i bool ∷ a ⇒ a / p
 
-    data _:-is_ : insns → lfunctype → Set where
+  data _:-is_ where
       [] : ∀ {a p} → [] :-is a ⇒ a / p
       _∷_ : ∀ {a b c p i is}
             → i :-i' a ⇒ b / p
             → is :-is b ⇒ c / p
             → i ∷ is :-is a ⇒ c / p
 
-    _:-i'_ : insn → lfunctype → Set
-    i :-i' t = ∃ {A = lfunctype × resulttype} λ (a ⇒ b / p , c) → (i :-i a ⇒ b / p) × (t ≡ a ++ c ⇒ b ++ c / p)
+  i :-i' t = ∃ {A = lfunctype × resulttype} λ (a ⇒ b / p , c) → (i :-i a ⇒ b / p) × (t ≡ a ++ c ⇒ b ++ c / p)
 
   weaken:-i : ∀{a b p i} → (c : resulttype) → (i :-i a ⇒ b / p) → i :-i' a ++ c ⇒ b ++ c / p
   weaken:-i {a} {b} {p} {i} c pi = (a ⇒ b / p , c) , (pi , refl)
@@ -162,7 +179,10 @@ module Typing where
   tfdrop {q = p ∷ ps} (pf ∷ pfs) with tfheadtail (pf ∷ pfs)
   ... | _ , _ , _ , _ , pfs' , refl = tfdrop pfs'
 
-  tbr-helper : ∀{a b c d q r fs vs is} → (fs :-fs a / q ++ (b ∷ r) ⇒ c) → (vs :-vs b ++ d) → ∃ λ a' → ∃ λ fs' → ∃ λ vs' → ∃ λ lis' → ∃ λ cis' → Interpreter.br-helper (length q) (fs , vs , is) ≡ Interpreter.ok' (fs' , List.take (length b) vs ++ vs' , lis' ++ cis') × ((vs' , length b , lis' , cis') ∷ fs' :-fs a' / (b ∷ r) ⇒ c)
+  tbr-helper : ∀{a b c d q r fs vs is} →
+   (fs :-fs a / q ++ (b ∷ r) ⇒ c) →
+   (vs :-vs b ++ d) → ∃ λ a' → ∃ λ fs' → ∃ λ vs' → ∃ λ lis' → ∃ λ cis' →
+   Interpreter.Control.br-helper (length q) (fs , vs , is) ≡ Interpreter.ok' (fs' , List.take (length b) vs ++ vs' , lis' ++ cis') × ((vs' , length b , lis' , cis') ∷ fs' :-fs a' / (b ∷ r) ⇒ c)
   tbr-helper {b = b} {q = q} {fs = fs} {vs = vs} pfs pvs with List.drop (length q) fs | inspect (List.drop (length q)) fs
   ... | ffs' | [ dropq-fs≡ffs' ] with tfdrop pfs 
   ...                               |  (a' , pffs') with tfheadtail pffs'
@@ -170,11 +190,11 @@ module Typing where
   tbr-helper {b = b} {q = q} {fs = fs} {vs = vs} pfs pvs | .((vs' , length a , lis' , cis') ∷ fs') | [ dropq-fs≡ffs' ] | a' , pffs' | (vs' , .(length a) , lis' , cis') , fs' , b' , tframe {a} plis' pvs' pcis' refl , pfs' , dropq-fs≡f'∷fs' | refl = (a' , fs' , vs' , lis' , cis' , refl , tframe plis' pvs' pcis' refl ∷ pfs')
 
   data _:-_ : config → resulttype → Set where
-    tconfig : ∀ {a b c vs is fs}
+    tconfig : ∀ {a b c m vs is fs}
              → fs :-fs b ⇒ c
              → vs :-vs a
-             → is :-is a ⇒ b 
-             → (fs , vs , is) :- c
+             → is :-is a ⇒ b
+             → (m , fs , vs , is) :- c
 
   _tv++_ : ∀ {vs vs' ts ts'} → vs :-vs ts → vs' :-vs ts' → vs ++ vs' :-vs ts ++ ts'
   _tv++_ [] pvs' = pvs'
@@ -202,56 +222,58 @@ module Typing where
   open Interpreter
 
   safety : ∀{t} → (st : config) → st :- t → ∃ λ st' → (estep st ≡ ok' st') × (st' :- t)
-  safety ([] , vs , []) p = ([] , vs , []) , (refl , p)
-  safety ((vs , _ , _ , cis) ∷ fs , vs' , []) (tconfig ((tframe _ pvs pcis _) ∷ pfs) pvs' []) =
-    (fs , vs' ++ vs , cis) , (refl , tconfig pfs (pvs' tv++ pvs) pcis)
+  safety (m , [] , vs , []) p = (m , [] , vs , []) , (refl , p)
+  safety (m , (vs , _ , _ , cis) ∷ fs , vs' , []) (tconfig ((tframe _ pvs pcis _) ∷ pfs) pvs' []) =
+    (m , fs , vs' ++ vs , cis) , (refl , tconfig pfs (pvs' tv++ pvs) pcis)
 
-  safety (fs' , vs , const x ∷ is) (tconfig {_} {_ / _} pfs pvs (((.[] ⇒ _ ∷ .[] / _ , _) , tconst {_} pv , refl) ∷ pis)) = (fs' , x ∷ vs , is) , (refl , tconfig pfs (pv ∷ pvs) pis)
+  safety (m , fs' , vs , const x ∷ is) (tconfig {_} {_ / _} pfs pvs (((.[] ⇒ _ ∷ .[] / _ , _) , tconst {_} pv , refl) ∷ pis)) = (m , fs' , x ∷ vs , is) , (refl , tconfig pfs (pv ∷ pvs) pis)
 
-  safety (fs' , vs , nop ∷ is) (tconfig {_} {_ / _} pfs pvs (((.[] ⇒ .[] / _ , _) , tnop , refl) ∷ pis)) = (fs' , vs , is) , (refl , tconfig pfs pvs pis)
+  safety (m , fs' , vs , nop ∷ is) (tconfig {_} {_ / _} pfs pvs (((.[] ⇒ .[] / _ , _) , tnop , refl) ∷ pis)) = (m , fs' , vs , is) , (refl , tconfig pfs pvs pis)
 
-  safety (fs' , bool v ∷ vs , not ∷ is) (tconfig pfs (tbool ∷ pvs) ((_ , tnot , refl) ∷ pis)) = (fs' , bool (Bool.not v) ∷ vs , is) , (refl , tconfig pfs (tbool ∷ pvs) pis)
+  safety (m , fs' , bool v ∷ vs , not ∷ is) (tconfig pfs (tbool ∷ pvs) ((_ , tnot , refl) ∷ pis)) = (m , fs' , bool (Bool.not v) ∷ vs , is) , (refl , tconfig pfs (tbool ∷ pvs) pis)
 
-  safety (fs' , bool v ∷ bool v' ∷ vs , and ∷ is) (tconfig pfs (tbool ∷ tbool ∷ pvs) ((_ , tand , refl) ∷ pis)) = (fs' , bool (v Bool.∧ v') ∷ vs , is) , (refl , tconfig pfs (tbool ∷ pvs) pis)
+  safety (m , fs' , bool v ∷ bool v' ∷ vs , and ∷ is) (tconfig pfs (tbool ∷ tbool ∷ pvs) ((_ , tand , refl) ∷ pis)) = (m , fs' , bool (v Bool.∧ v') ∷ vs , is) , (refl , tconfig pfs (tbool ∷ pvs) pis)
 
-  safety (fs' , nat n ∷ nat m ∷ vs , add ∷ is) (tconfig pfs (tnat ∷ (tnat ∷ pvs)) ((_ , tadd , refl) ∷ pis)) = (fs' , nat (n Nat.+ m) ∷ vs , is) , (refl , tconfig pfs (tnat ∷ pvs) pis)
+  safety (mm , fs' , nat n ∷ nat m ∷ vs , add ∷ is) (tconfig pfs (tnat ∷ (tnat ∷ pvs)) ((_ , tadd , refl) ∷ pis)) = (mm , fs' , nat (n Nat.+ m) ∷ vs , is) , (refl , tconfig pfs (tnat ∷ pvs) pis)
 
-  safety (fs' , nat n ∷ nat m ∷ vs , sub ∷ is) (tconfig pfs (tnat ∷ (tnat ∷ pvs)) ((_ , tsub , refl) ∷ pis)) = (fs' , nat (n Nat.∸ m) ∷ vs , is) , (refl , tconfig pfs (tnat ∷ pvs) pis)
+  safety (mm , fs' , nat n ∷ nat m ∷ vs , sub ∷ is) (tconfig pfs (tnat ∷ (tnat ∷ pvs)) ((_ , tsub , refl) ∷ pis)) = (mm , fs' , nat (n Nat.∸ m) ∷ vs , is) , (refl , tconfig pfs (tnat ∷ pvs) pis)
 
-  safety (fs' , nat n ∷ vs , eqz ∷ is) (tconfig pfs (tnat ∷ pvs) ((_ , teqz , refl) ∷ pis)) = (fs' , bool (feqz n) ∷ vs , is) , (refl , tconfig pfs (tbool ∷ pvs) pis)
+  safety (m , fs' , nat n ∷ vs , eqz ∷ is) (tconfig pfs (tnat ∷ pvs) ((_ , teqz , refl) ∷ pis)) = (m , fs' , bool (feqz n) ∷ vs , is) , (refl , tconfig pfs (tbool ∷ pvs) pis)
 
-  safety (fs' , v ∷ vs , dup ∷ is) (tconfig {_} {_ / _} pfs (pv ∷ pvs) (((_ ∷ .[] ⇒ .(_ ∷ _ ∷ []) / _ , _) , tdup , refl) ∷ pis)) = (fs' , v ∷ v ∷ vs , is) , (refl , tconfig pfs (pv ∷ pv ∷ pvs) pis)
+  safety (m , fs' , v ∷ vs , dup ∷ is) (tconfig {_} {_ / _} pfs (pv ∷ pvs) (((_ ∷ .[] ⇒ .(_ ∷ _ ∷ []) / _ , _) , tdup , refl) ∷ pis)) = (m , fs' , v ∷ v ∷ vs , is) , (refl , tconfig pfs (pv ∷ pv ∷ pvs) pis)
 
-  safety (fs' , (._ ∷ vs) , drop ∷ is) (tconfig pfs (x ∷ pvs) (((t ∷ .[] ⇒ .[] / p , c) , tdrop , refl) ∷ pis)) = (fs' , vs , is) , (refl , tconfig pfs pvs pis)
+  safety (m , fs' , (._ ∷ vs) , drop ∷ is) (tconfig pfs (x ∷ pvs) (((t ∷ .[] ⇒ .[] / p , c) , tdrop , refl) ∷ pis)) = (m , fs' , vs , is) , (refl , tconfig pfs pvs pis)
 
-  safety (fs' , vs , block (a ⇒ b) is ∷ cis) (tconfig pfs pvs (_∷_ {c = d} (((.a ⇒ .b / p) , c) , tblock pis , refl) pcis)) = ((List.drop (length a) vs , length b , [] , cis) ∷ fs' , List.take (length a) vs , is) , (refl , tconfig ((tframe [] (tvdrop (length a) pvs) pcis' refl) ∷ pfs) (tvtake (length a) pvs) pis')
+  safety (m , fs' , vs , block (a ⇒ b) is ∷ cis) (tconfig pfs pvs (_∷_ {c = d} (((.a ⇒ .b / p) , c) , tblock pis , refl) pcis)) = (m , (List.drop (length a) vs , length b , [] , cis) ∷ fs' , List.take (length a) vs , is) , (refl , tconfig ((tframe [] (tvdrop (length a) pvs) pcis' refl) ∷ pfs) (tvtake (length a) pvs) pis')
     where pcis' = subst (λ x → cis :-is b ++ x ⇒ d / p) (drop-length a c) pcis
           pis' = subst (λ x → is :-is x ⇒ b / b ∷ p) (take-length a c) pis
 
-  safety (fs' , bool bb ∷ vs , if-else (a ⇒ b) is-t is-f ∷ cis) (tconfig pfs (tbool ∷ pvs) (_∷_ {c = d} (((.(bool ∷ a) ⇒ .b / p) , c) , tif-else pis-t pis-f , refl) pcis)) with bb
-  ... | true = ((List.drop (length a) vs , length b , [] , cis) ∷ fs' , List.take (length a) vs , is-t) , (refl , tconfig ((tframe [] (tvdrop (length a) pvs) pcis' refl) ∷ pfs) (tvtake (length a) pvs) pis-t')
+  safety (m , fs' , bool bb ∷ vs , if-else (a ⇒ b) is-t is-f ∷ cis) (tconfig pfs (tbool ∷ pvs) (_∷_ {c = d} (((.(bool ∷ a) ⇒ .b / p) , c) , tif-else pis-t pis-f , refl) pcis)) with bb
+  ... | true = (m , (List.drop (length a) vs , length b , [] , cis) ∷ fs' , List.take (length a) vs , is-t) , (refl , tconfig ((tframe [] (tvdrop (length a) pvs) pcis' refl) ∷ pfs) (tvtake (length a) pvs) pis-t')
     where pcis' = subst (λ x → cis :-is b ++ x ⇒ d / p) (drop-length a c) pcis
           pis-t' = subst (λ x → is-t :-is x ⇒ b / b ∷ p) (take-length a c) pis-t
-  ... | false = ((List.drop (length a) vs , length b , [] , cis) ∷ fs' , List.take (length a) vs , is-f) , (refl , tconfig ((tframe [] (tvdrop (length a) pvs) pcis' refl) ∷ pfs) (tvtake (length a) pvs) pis-f')
+  ... | false = (m , (List.drop (length a) vs , length b , [] , cis) ∷ fs' , List.take (length a) vs , is-f) , (refl , tconfig ((tframe [] (tvdrop (length a) pvs) pcis' refl) ∷ pfs) (tvtake (length a) pvs) pis-f')
     where pcis' = subst (λ x → cis :-is b ++ x ⇒ d / p) (drop-length a c) pcis
           pis-f' = subst (λ x → is-f :-is x ⇒ b / b ∷ p) (take-length a c) pis-f
 
-  safety (fs' , vs , loop (a ⇒ b) is ∷ cis) (tconfig pfs pvs (_∷_ {c = d} (((.a ⇒ .b / p) , c) , tloop pis , refl) pcis)) = ((List.drop (length a) vs , length a , loop (a ⇒ b) is ∷ [] , cis) ∷ fs' , List.take (length a) vs , is) ,
+  safety (m , fs' , vs , loop (a ⇒ b) is ∷ cis) (tconfig pfs pvs (_∷_ {c = d} (((.a ⇒ .b / p) , c) , tloop pis , refl) pcis)) = (m , (List.drop (length a) vs , length a , loop (a ⇒ b) is ∷ [] , cis) ∷ fs' , List.take (length a) vs , is) ,
              (refl , tconfig ((tframe (weaken:-i [] (tloop pis) ∷ []) (tvdrop (length a) pvs) pcis' len-a) ∷ pfs) (tvtake (length a) pvs) pis')
              where pcis' = subst (λ x → cis :-is (b ++ []) ++ x ⇒ d / p) (drop-length a c) ∘ subst (λ x → cis :-is x ++ c ⇒ d / p ) (sym (++-identityʳ b)) $ pcis
                    len-a = sym (cong List.length (++-identityʳ a))
                    pis' = subst (λ x → is :-is x ⇒ b ++ [] / (a ++ []) ∷ p) (take-length a c) (subst (λ x → is :-is a ⇒ x / (a ++ []) ∷ p) (sym (++-identityʳ b)) (subst (λ x → is :-is a ⇒ b / x ∷ p) (sym (++-identityʳ a)) pis))
 
-  safety (fs , vs , br .(length q) ∷ is) (tconfig pfs pvs (((.(_ ⇒ _ / q ++ a ∷ _) , e) , tbrn {a = a} {q = q} {r = r} .(length q) refl refl , refl) ∷ pis)) with tbr-helper {is = is} pfs pvs
-  ... | a' , fs' , vs' , lis' , cis' , pbr , (tframe {c = c} plis' pvs' pcis' refl ∷ pfs') = (fs' , List.take (length a) vs ++ vs' , lis' ++ cis') , (pbr , tconfig pfs' (tvtake (length a) pvs tv++ pvs') (plis'' ti++ pcis')) 
+  safety (m , fs , vs , br .(length q) ∷ is) (tconfig pfs pvs (((.(_ ⇒ _ / q ++ a ∷ _) , e) , tbrn {a = a} {q = q} {r = r} .(length q) refl refl , refl) ∷ pis)) with tbr-helper {is = is} pfs pvs
+  ... | a' , fs' , vs' , lis' , cis' , pbr , (tframe {c = c} plis' pvs' pcis' refl ∷ pfs') = (m , fs' , List.take (length a) vs ++ vs' , lis' ++ cis') , ( pbr' , tconfig pfs' (tvtake (length a) pvs tv++ pvs') (plis'' ti++ pcis')) 
     where plis'' = weaken:-is c ( subst (λ x → lis' :-is x ⇒ a' / r) (take-length a e) plis')
+          pbr' = cong (fromControlE (m , fs , vs , is)) pbr
 
-  safety (fs , bool true ∷ vs , br-if .(length q) ∷ is) (tconfig pfs (tbool ∷ pvs) (((.(_ ⇒ _ / q ++ a ∷ _) , e) , tbrifn {a = a} {q = q} {r = r} .(length q) refl refl , refl) ∷ pis)) with tbr-helper {is = is} pfs pvs
-  ... | a' , fs' , vs' , lis' , cis' , pbr , (tframe {c = c} plis' pvs' pcis' refl ∷ pfs') = (fs' , List.take (length a) vs ++ vs' , lis' ++ cis') , (pbr , tconfig pfs' (tvtake (length a) pvs tv++ pvs') (plis'' ti++ pcis')) 
+  safety (m , fs , bool true ∷ vs , br-if .(length q) ∷ is) (tconfig pfs (tbool ∷ pvs) (((.(_ ⇒ _ / q ++ a ∷ _) , e) , tbrifn {a = a} {q = q} {r = r} .(length q) refl refl , refl) ∷ pis)) with tbr-helper {is = is} pfs pvs
+  ... | a' , fs' , vs' , lis' , cis' , pbr , (tframe {c = c} plis' pvs' pcis' refl ∷ pfs') = (m , fs' , List.take (length a) vs ++ vs' , lis' ++ cis') , ( pbr' , tconfig pfs' (tvtake (length a) pvs tv++ pvs') (plis'' ti++ pcis')) 
     where plis'' = weaken:-is c ( subst (λ x → lis' :-is x ⇒ a' / r) (take-length a e) plis')
+          pbr' = cong (fromControlE (m , fs , vs , is)) pbr
 
-  safety (fs , bool false ∷ vs , br-if .(length q) ∷ is) (tconfig pfs (tbool ∷ pvs) (((.(_ ⇒ _ / q ++ a ∷ _) , e) , tbrifn {a = a} {q = q} {r = r} .(length q) refl refl , refl) ∷ pis)) =
-    (fs , vs , is) , (refl , tconfig pfs pvs pis)
+  safety (m , fs , bool false ∷ vs , br-if .(length q) ∷ is) (tconfig pfs (tbool ∷ pvs) (((.(_ ⇒ _ / q ++ a ∷ _) , e) , tbrifn {a = a} {q = q} {r = r} .(length q) refl refl , refl) ∷ pis)) =
+    (m , fs , vs , is) , (refl , tconfig pfs pvs pis)
 
 module TypeExample where
   open Typing
