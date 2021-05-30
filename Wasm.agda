@@ -85,6 +85,15 @@ module _ where
   Lens.view idlens = Function.id
   Lens.update idlens = Function.const Function.id
 
+  record Prism (S A : Set) : Set where
+    field
+      preview : S → Maybe A
+      review : A → S
+
+  idprism : ∀{S : Set} → Prism S S
+  Prism.preview idprism = just
+  Prism.review idprism = Function.id
+
 module Syntax where
   open Product
   open import Function.Identity.Categorical as Id using (Identity)
@@ -218,7 +227,7 @@ module Syntax where
       go : insns → String
       go [] = ""
       go (i ∷ []) = show-insn i
-      go (i ∷ is) = show-insn i ++ " " ++ show-insns is
+      go (i ∷ is) = show-insn i ++ " " ++ go is
 
     show-insn (const v) = concat-with-space ("const" ∷ show-val v ∷ [])
     show-insn nop = "nop"
@@ -284,46 +293,44 @@ module InterpreterCore where
   open Product
   open Unit
   open Function
-  data Err (S : Set) : Set where
-    ok : S → Err S
-    error : String → Err S
+  data Eval (R S : Set) : Set where
+    run : S → Eval R S
+    stop : R → Eval R S
 
-  bind : ∀{A B} → Err A → (A → Err B) → Err B
-  bind (ok x) f = f x
-  bind (error x) _ = error x
+  bind : ∀{A B R} → Eval R A → (A → Eval R B) → Eval R B
+  bind (run s) f = f s
+  bind (stop r) _ = stop r
 
-  ErrMonad : RawMonad Err
-  ErrMonad = record
-    { return = ok
+  EvalMonad : (R : Set) → RawMonad (Eval R)
+  EvalMonad R = record
+    { return = run
     ; _>>=_ = bind
     }
 
   open Category.Monad.State
 
---   StErr' : Set → Set → Set 
+  StEval : Set → Set → Set → Set
+  StEval R S = IStateT (λ _ → S) (Eval R) tt tt
 
-  StErr : Set → Set → Set
-  StErr S = IStateT (λ _ → S) Err tt tt
+  StEvalMonad : ∀ (R S : Set) → RawMonad (StEval R S)
+  StEvalMonad R S = StateTIMonad (λ _ → S) (EvalMonad R)
 
-  StErrMonad : ∀ (S : Set) → RawMonad (StErr S)
-  StErrMonad S = StateTIMonad (λ _ → S) ErrMonad
+  pattern ok a = run a
+  pattern ok' a = run (tt , a)
 
-  pattern ok' a = ok (tt , a)
-
-  zoomE : {S' S X : Set} → (Lens S S') → S → Err (X × S') → Err (X × S)
-  zoomE lens s ms' = do
-    (x , s') ← ms'
-    return $ x , update s s'
+  zoomE : {R' R S' S X : Set} → (Lens S S') → (Prism R R') → S → Eval R' (X × S') → Eval R (X × S)
+  zoomE lens prism s (stop r') = stop (review r')
+    where open Prism prism
+  zoomE lens prism s (run (x , s')) = run (x , (update s s'))
     where open Lens lens
-          open RawMonad ErrMonad
 
-  zoom : {S' S X : Set} → (Lens S S') → StErr S' X → StErr S X
-  zoom lens ms' = λ s → do
-    (x , s') ← ms' (view s)
-    return $ x , update s s'
-    where open Lens lens
-          open RawMonad ErrMonad
-  
+  zoom : {R' R S' S X : Set} → (Lens S S') → (Prism R R') → StEval R' S' X → StEval R S X
+  zoom lens prism st' s0 = let
+    s0' = view s0
+    rs1' = st' s0'
+    in zoomE lens prism s0 rs1' where
+      open Lens lens
+      open Prism prism
 
 feqz : Nat.ℕ → Bool.Bool
 feqz 0 = Bool.true
@@ -344,31 +351,40 @@ module Interpreter where
   open InterpreterCore public
   open Show
 
-
   interp-valtype : valtype → Set
   interp-valtype bool = Bool
   interp-valtype nat = ℕ
   interp-valtype unit = ⊤
 
-  module Numeric where
-    subconfig = vals
-    private
-      M = StErr (subconfig)
+  {-
+  data reskind : Set where
+    error : String → reskind
+    value : vals → reskind
+    trap : config → reskind
+  -}
 
-    open RawMonad (StErrMonad (subconfig))
+  -- StE = StEval reskind
+
+  module Numeric where
+    res = String
+    cfg = vals
+    M = StEval res cfg
+
+    pattern error' s = stop s
+    open RawMonad (StEvalMonad res cfg)
 
     push : val → M ⊤
     push v vs = ok' (v ∷ vs)
 
     pop : M val
     pop (v ∷ vs) = ok (v , vs)
-    pop _ = error "value stack underflow"
+    pop _ = error' "value stack underflow"
 
     chkval : (t : valtype) → val → M (interp-valtype t)
     chkval bool (bool b) = return b
     chkval nat (nat n) = return n
     chkval unit (unit tt) = return tt
-    chkval expected v _ = error (concat-with-space $ show-val v ∷ "has type" ∷ show-valtype (actual v) ∷ "instead of" ∷ show-valtype expected ∷ [])
+    chkval expected v _ = error' (concat-with-space $ show-val v ∷ "has type" ∷ show-valtype (actual v) ∷ "instead of" ∷ show-valtype expected ∷ [])
       where actual : val → valtype
             actual (bool _) = bool
             actual (nat _) = nat
@@ -407,15 +423,16 @@ module Interpreter where
       return tt
   
   module Control where
-  
-    subconfig = frames × vals × insns
-    M = StErr subconfig
+    res = String
+    cfg = frames × vals × insns
+    M = StEval res cfg
+    pattern error' s = stop s
 
-    open RawMonad (StErrMonad subconfig)
+    open RawMonad (StEvalMonad res cfg)
 
-    zoom' : {X : Set} → StErr vals X → StErr subconfig X
-    zoom' m = zoom lens m where
-      lens : Lens subconfig Numeric.subconfig
+    zoom' : {X : Set} → Numeric.M X → M X
+    zoom' m = zoom lens idprism m where
+      lens : Lens cfg Numeric.cfg
       Lens.view lens (fs , vs , is) = vs
       Lens.update lens (fs , vs , is) vs' = (fs , vs' , is)
 
@@ -433,11 +450,11 @@ module Interpreter where
     
     leave : M frame
     leave ((vs , a , l , is) ∷ fs , vs' , is') = ok ((vs' , a , l , is') , fs , vs , is)
-    leave _ = error "control stack underflow"
+    leave _ = error' "control stack underflow"
   
     br-helper : ℕ → M ⊤
     br-helper n (fs , vs , _) with List.drop n fs
-    ... | [] = error "branch to outside" 
+    ... | [] = error' "branch to outside" 
     ... | (vs' , m , lis , cis) ∷ fs' = ok' (fs' , (take m vs) ++ vs' , lis ++ cis)
 
     popchk : (t : valtype) → M (interp-valtype t)
@@ -467,16 +484,29 @@ module Interpreter where
     eend (vs , _ , _ , is) (fs , vs' , _) = ok' (fs , vs' ++ vs , is)
 
   module Memory where
-    open Decidable
-    subconfig = mem × vals
-    M = StErr subconfig
-    open RawMonad (StErrMonad subconfig)
+    data res : Set where
+      error : String → res
+      trap : res
 
-    zoom' : {X : Set} → StErr vals X → StErr subconfig X
-    zoom' m = zoom lens m where
-      lens : Lens subconfig Numeric.subconfig
+    cfg = mem × vals
+    M = StEval res cfg
+
+    open Decidable
+
+    pattern error' s = stop (error s)
+    pattern trap' = stop trap
+
+    open RawMonad (StEvalMonad res cfg)
+
+    zoom' : {X : Set} → StEval Numeric.res Numeric.cfg X → StEval res cfg X
+    zoom' m = zoom lens prism m where
+      lens : Lens cfg Numeric.cfg
       Lens.view lens (m , vs) = vs
       Lens.update lens (m , vs) vs' = (m , vs')
+      prism : Prism res Numeric.res
+      Prism.preview prism (error s) = Maybe.just s
+      Prism.preview prism trap = Maybe.nothing
+      Prism.review prism s = error s
 
     getmem : M mem
     getmem (m , vs) = ok (m , m , vs)
@@ -503,14 +533,14 @@ module Interpreter where
     write i v = do
       m ← getmem
       true ← return (chklimit i m) where
-        false → λ _ → error "write access out of range"
+        false → λ _ → trap'
       setmem (reassign i v m)
 
     read : ℕ → M ℕ
     read i = do
       m ← getmem
       true ← return (chklimit i m) where
-        false → λ _ → error "read access out of range"
+        false → λ _ → trap'
       return (mem.assign m i)
 
     open Relation.Binary
@@ -542,53 +572,76 @@ module Interpreter where
       setmem m'
       push (nat n')
 
+  data res : Set where
+    error : String → res
+    done : mem × vals → res
+    trap : res
 
-  fromNumeric : ∀{X} → StErr Numeric.subconfig X → StErr config X
-  fromNumeric = zoom lens where
-    lens : Lens config Numeric.subconfig 
+  M = StEval res config
+
+  pattern error' s = stop (error s)
+  pattern trap' = stop (trap)
+  pattern done' m vs = stop (done (m , vs))
+
+  fromNumeric : ∀{X} → Numeric.M X → M X
+  fromNumeric = zoom lens prism where
+    lens : Lens config Numeric.cfg 
     Lens.view   lens (m , fs , vs , is) = vs
     Lens.update lens (m , fs , vs , is) vs' = (m , fs , vs' , is)
+    prism : Prism res Numeric.res
+    Prism.preview prism (error s) = Maybe.just s
+    Prism.preview prism _ = Maybe.nothing
+    Prism.review prism s = error s
 
-  fromControl : ∀{X} → StErr Control.subconfig X → StErr config X
-  fromControl = zoom lens where
-    lens : Lens config Control.subconfig 
+  module C2Cfg where
+    lens : Lens config Control.cfg 
     Lens.view   lens (m , fs , vs , is) = (fs , vs , is)
     Lens.update lens (m , fs , vs , is) (fs' , vs' , is') = (m , fs' , vs' , is')
+    prism : Prism res Control.res
+    Prism.preview prism (error s) = Maybe.just s
+    Prism.preview prism _ = Maybe.nothing
+    Prism.review prism s = error s
 
-  fromControlE : ∀{X} → config → Err (X × Control.subconfig) → Err (X × config)
-  fromControlE c = zoomE lens c where
-    lens : Lens config Control.subconfig 
-    Lens.view   lens (m , fs , vs , is) = (fs , vs , is)
-    Lens.update lens (m , fs , vs , is) (fs' , vs' , is') = (m , fs' , vs' , is')
+  fromControl : ∀{X} → Control.M X → M X
+  fromControl = zoom C2Cfg.lens C2Cfg.prism
 
-  fromMemory : ∀{X} → StErr Memory.subconfig X → StErr config X
-  fromMemory = zoom lens where
-    lens : Lens config Memory.subconfig
+  fromControlE : ∀{X} → config → Eval Control.res (X × Control.cfg) → Eval res (X × config)
+  fromControlE = zoomE C2Cfg.lens C2Cfg.prism where
+
+  fromMemory : ∀{X} → Memory.M X → M X
+  fromMemory = zoom lens prism where
+    lens : Lens config Memory.cfg
     Lens.view   lens (m , fs , vs , is) = (m , vs)
     Lens.update lens (m , fs , vs , is) (m' , vs') = (m' , fs , vs' , is)
+    prism : Prism res Memory.res
+    Prism.preview prism (error s) = Maybe.just (Memory.error s)
+    Prism.preview prism (trap) = Maybe.just (Memory.trap)
+    Prism.preview prism _ = Maybe.nothing
+    Prism.review prism (Memory.error s) = error s
+    Prism.review prism (Memory.trap) = trap
 
   module _ where
-    open RawMonad (StErrMonad config)
+    open RawMonad (StEvalMonad res config)
 
-    einsn : insn → StErr config ⊤
+    einsn : insn → M ⊤
     einsn nop = return tt
     einsn (numeric i) = fromNumeric (Numeric.einsn i)
     einsn (control i) = fromControl (Control.einsn i)
     einsn (memory i) = fromMemory (Memory.einsn i)
 
-    estep : StErr config ⊤
+    estep : M ⊤
     estep (m , fs , vs , i ∷ is) = einsn i (m , fs , vs , is)
     estep (m , fs' , vs , []) with fs'
-    ... | [] = ok' (m , [] , vs , [])
+    ... | [] = done' m  vs
     ... | f ∷ fs = fromControl (Control.eend f) (m , fs , vs , [])
 
     -- pattern matching for `fs` (the cases for `[]` and `f ∷ fs`) must be here on the bottom of the cases, and you can not place it to the beginning of the function definition.
     -- Otherwise, in the proof of safety, agda requires patttarn-matching on `fs` to normalize the term in any other case, and `estep (fs , vs , br n)` won't be able to normalize `eifstep ...` in a natural way.
     -- This is caused by difference in case tree
 
-    estepn : ℕ → StErr config ⊤
-    estepn zero (m , [] , vs , []) = ok' (m , [] , vs , [])
-    estepn zero _ = error "timeout"
+    estepn : ℕ → M ⊤
+    estepn n (m , [] , vs , []) = done' m  vs
+    estepn zero s = trap'
     estepn (suc n) = estep >> estepn n
 
 module Example where
@@ -602,7 +655,7 @@ module Example where
   open Unit
   open Show
 
-  ex0 ex1 ex2 ex3 ex4 ex5 ex6 ex7 ex8 : config
+  ex0 ex1 ex2 ex3 ex4 ex5 ex6 ex7 ex8 ex9 : config
   ex0 = (initmem , [] , (nat 1 ∷ nat 2 ∷ []) , (add ∷ []))
   ex1 = (initmem , [] , (bool true ∷ nat 1 ∷ nat 0 ∷ []) , ( not ∷ (if-else (nat ∷ nat ∷ [] ⇒ [ nat ]) [ add ] [ drop ]) ∷ []))
   ex2 = (initmem , [] , [] , (block ([] ⇒ [ nat ]) (const (nat 1) ∷ block ([ nat ] ⇒ [ nat ]) (br 1 ∷ []) ∷ []) ∷ []))
@@ -612,13 +665,16 @@ module Example where
   ex6 = (initmem , [] , bool true ∷ bool true ∷ [] , and ∷ [])
   ex7 = (initmem , [] , bool true ∷ bool true ∷ [] , add ∷ [])
   ex8 = (initmem , [] , nat 1 ∷ [] , block (nat ∷ [] ⇒ bool ∷ []) (const (nat 1) ∷ block (nat ∷ [] ⇒ []) (const (bool true) ∷ br 1 ∷ []) ∷ []) ∷ [])
+  ex9 = (initmem , [] , [] , const (nat 10) ∷ grow ∷ drop ∷ const (nat 5) ∷ const (nat 3) ∷ store ∷ [])
 
-  show-result : Err (⊤ × config) → String
-  show-result (ok' st) = concat-with-colon (show-config st ∷ [])
-  show-result (error emesg) = concat-with-colon ("error" ∷ emesg ∷ [])
+  show-result : Eval res (⊤ × config) → String
+  show-result (done' m vs) = "(" ++ concat-with-comma (show-mem m ∷ show-vals vs ∷ []) ++ ")"
+  show-result (error' msg) = concat-with-colon ("error" ∷ msg ∷ [])
+  show-result (trap') = concat-with-colon ("trap" ∷ [])
+  show-result _ = "still running"
 
   show-eval : config → String
-  show-eval ex = show-config ex ++ " ↪* " ++ show-result (estepn 1024 ex)
+  show-eval ex = show-config ex ++ " ↦* " ++ show-result (estepn 1024 ex)
 
-  run : List String
-  run = (List.map show-eval (ex0 ∷ ex1 ∷ ex2 ∷ ex3 ∷ ex4 ∷ ex5 ∷ ex6 ∷ ex7 ∷ ex8 ∷ []))
+  run_ : List String
+  run_ = (List.map show-eval (ex0 ∷ ex1 ∷ ex2 ∷ ex3 ∷ ex4 ∷ ex5 ∷ ex6 ∷ ex7 ∷ ex8 ∷ ex9 ∷ []))
