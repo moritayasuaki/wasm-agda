@@ -115,30 +115,7 @@ record OmegaChainCompleteBoundedJoinSemilattice c ℓ₁ ℓ₂ : Set (Level.suc
 
   open IsOmegaChainCompleteBoundedJoinSemilattice isOmegaChainCompleteBoundedJoinSemilattice public
 
-{-
-takeFixedPoint : ∀{a ℓ₁ ℓ₂} → {X : Set a} → {_≈_ : Rel X ℓ₁} → {_≲_ : Rel X ℓ₂} →
-  (IsOmegaChainCompletePartialOrder _≈_ _≲_) → (f : X → X) → (IsOrderHomomorphism _≈_ _≈_ _≲_ _≲_ f) → X → Σ X (IsFixedPoint _≈_ f)
-takeFixedPoint {X = X} {_≈_ = _≈_} {_≲_ = _≲_} isωccpo f fIsMonotone z = (fixedPoint , isFixedPoint) where
-  open IsOrderHomomorphism
-  open IsNoetherian
-  open IsOmegaChainCompletePartialOrder
-  s : ℕ → X
-  s = flip (iter f) z
-  sIsNoetherian : IsNoetherian _≈_ _≲_ s
-  sIsNoetherian .isOmegaChain = sIsOmegaChain where
-    sIsOmegaChain : IsOmegaChain _≈_ _≲_ s
-    sIsOmegaChain .mono Nat.z≤n = {! f .mono!}
-    sIsOmegaChain .mono (Nat.s≤s r) = {!!}
-    sIsOmegaChain .cong r = {!!}
-  sIsNoetherian .height = {!!}
-  sIsNoetherian .stabilize i height≲i = {!!}
-  fixedPoint = s (sIsNoetherian . height)
-  isFixedPoint : IsFixedPoint _≈_ f fixedPoint
-  isFixedPoint = {!!} where
-    open import Data.Nat.Properties
--} 
-  
-
+ 
 module _ where
   private
     variable
