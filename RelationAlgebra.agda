@@ -7,9 +7,14 @@ open import Data.Product
 open import Relation.Nullary
 open import Relation.Unary
 open import Relation.Binary
+open import Relation.Binary.Bundles
+open import Relation.Binary.Structures
 open import Relation.Binary.Lattice
 open import Relation.Binary.Morphism.Structures
+open import Relation.Binary.PropositionalEquality using (_≡_)
 open import Algebra
+
+
 
 module _ where
   private
@@ -20,24 +25,40 @@ module _ where
       _≈_ : Rel X ℓ₁
       _≲_ : Rel X ℓ₂
 
-  IsOmegaChain : (ℕ → X) → Rel X ℓ₁ → Set ℓ₁
-  IsOmegaChain c _≲_ = (i : ℕ) → c i ≲ c (ℕ.suc i)
+  IsOmegaChain : {X : Set a} → Rel X ℓ₁ → Rel X ℓ₂ → (ℕ → X) → Set (ℓ₁ ⊔ ℓ₂)
+  IsOmegaChain _≈_ _≲_ c = IsOrderHomomorphism (_≡_ {A = ℕ}) _≈_ Nat._≤_ _≲_ c
 
-  record IsNoetherian (c : ℕ → X) (_≈_ : Rel X ℓ₂) : Set ℓ₂ where
+  record IsNoetherian {X : Set a} (_≈_ : Rel X ℓ₁) (_≲_ : Rel X ℓ₂) (c : ℕ → X) : Set (a ⊔ ℓ₁ ⊔ ℓ₂) where
     field
+      isOmegaChain : IsOmegaChain _≈_ _≲_ c 
       height : ℕ
       stabilize : (i : ℕ) → (height Nat.≤ i) → c i ≈ c (ℕ.suc i)
 
-  record IsEffectiveBoundedJoinSemilattice {X : Set a} (_≈_ : Rel X ℓ₁) (_≲_ : Rel X ℓ₂) (_∨_ : X → X → X) (⊥ : X) : Set (a ⊔ ℓ₁ ⊔ ℓ₂) where
+  record IsOmegaChainCompletePartialOrder {X : Set a} (_≈_ : Rel X ℓ₁) (_≲_ : Rel X ℓ₂) : Set (a ⊔ ℓ₁ ⊔ ℓ₂) where
     field
-      omega-chain-is-noetherian : (c : ℕ → X) → IsOmegaChain c _≲_ → IsNoetherian c _≈_
+      isPartialOrder : IsPartialOrder _≈_ _≲_
+      isOmegaChainComplete : (c : ℕ → X) → IsNoetherian _≈_ _≲_ c
+    open IsPartialOrder isPartialOrder public
+
+  record IsOmegaChainCompletePointedPartialOrder {X : Set a} (_≈_ : Rel X ℓ₁) (_≲_ : Rel X ℓ₂) (⊥ : X) : Set (a ⊔ ℓ₁ ⊔ ℓ₂) where
+    field
+      isOmegaChainCompletePartialOrder : IsOmegaChainCompletePartialOrder _≈_ _≲_ 
+      minimum : (x : X) → ⊥ ≲ x
+    open IsOmegaChainCompletePartialOrder isOmegaChainCompletePartialOrder public
+
+  record IsOmegaChainCompleteBoundedJoinSemilattice {X : Set a} (_≈_ : Rel X ℓ₁) (_≲_ : Rel X ℓ₂) (_∨_ : X → X → X) (⊥ : X) : Set (a ⊔ ℓ₁ ⊔ ℓ₂) where
+    field
+      isOmegaChainComplete : (c : ℕ → X) → IsNoetherian _≈_ _≲_ c
       isBoundedJoinSemilattice : IsBoundedJoinSemilattice _≈_ _≲_ _∨_ ⊥
     open IsBoundedJoinSemilattice isBoundedJoinSemilattice public
-
 
   IsFixedPoint : Rel X ℓ₁ → (X → X) → X → Set _
   IsFixedPoint _≈_ f x = f x ≈ x
 
+  record IsLeastFixedPoint {X : Set a} (_≈_ : Rel X ℓ₁) (_≲_ : Rel X ℓ₂) (f : X → X) (p : X) : Set (Level.suc (a ⊔ ℓ₁ ⊔ ℓ₂))  where
+    field
+      isFixedPoint : IsFixedPoint _≈_ f p
+      least : (x : X) → IsFixedPoint _≈_ f x → p ≲ x
 
   iter : (X → X) → ℕ → X → X
   iter f Nat.zero = id
@@ -45,57 +66,123 @@ module _ where
 
   iter-mono : (f : X → X) → (IsOrderHomomorphism _≈_ _≈_ _≲_ _≲_ f) →
     (n : ℕ) → (x y : X) → (x ≲ y) → iter f n x ≲ iter f n y
-  iter-mono f f-is-monotone (Nat.zero) x y p = p
-  iter-mono f f-is-monotone (Nat.suc n) x y p = mono (iter-mono f f-is-monotone n x y p) where
-    open IsOrderHomomorphism f-is-monotone
+  iter-mono f fIsMonotone (Nat.zero) x y p = p
+  iter-mono f fIsMonotone (Nat.suc n) x y p = fIsMonotone .mono (iter-mono f fIsMonotone n x y p) where
+    open IsOrderHomomorphism
   iter-fixed : (f : X → X) → (IsEquivalence _≈_) → (IsRelHomomorphism _≈_ _≈_ f) →
     (n : ℕ) → (x : X) → IsFixedPoint _≈_ f x → iter f n x ≈ x
   iter-fixed f ≈-is-equiv _ Nat.zero _ _ = refl where
     open IsEquivalence ≈-is-equiv
-  iter-fixed f ≈-is-equiv f-is-closed-under-≈ (Nat.suc n) x fx≈x = trans (cong fⁿx≈x) fx≈x where
-    open IsRelHomomorphism f-is-closed-under-≈
+  iter-fixed f ≈-is-equiv ≈-is-closed-under-f (Nat.suc n) x fx≈x = trans (cong fⁿx≈x) fx≈x where
+    open IsRelHomomorphism ≈-is-closed-under-f
     open IsEquivalence ≈-is-equiv
-    fⁿx≈x = iter-fixed f ≈-is-equiv f-is-closed-under-≈ n x fx≈x
+    fⁿx≈x = iter-fixed f ≈-is-equiv ≈-is-closed-under-f n x fx≈x
 
-record EffectiveBoundedJoinSemilattice c ℓ₁ ℓ₂ : Set (Level.suc (c ⊔ ℓ₁ ⊔ ℓ₂)) where
+record OmegaChainCompletePartialOrder c ℓ₁ ℓ₂ : Set (Level.suc (c ⊔ ℓ₁ ⊔ ℓ₂)) where
+  field
+    Carrier : Set c
+    _≈_     : Rel Carrier ℓ₁
+    _≲_     : Rel Carrier ℓ₂
+    isOmegaChainCompletePartialOrder : IsOmegaChainCompletePartialOrder _≈_ _≲_
+
   infix 4 _≈_ _≲_
-  infixr 7 _∨_
+
+  open IsOmegaChainCompletePartialOrder isOmegaChainCompletePartialOrder public
+
+record OmegaChainCompletePointedPartialOrder c ℓ₁ ℓ₂ : Set (Level.suc (c ⊔ ℓ₁ ⊔ ℓ₂)) where
+  field
+    Carrier : Set c
+    _≈_     : Rel Carrier ℓ₁
+    _≲_     : Rel Carrier ℓ₂
+    ⊥       : Carrier
+    isOmegaChainCompletePointedPartialOrder : IsOmegaChainCompletePointedPartialOrder _≈_ _≲_ ⊥
+
+  infix 4 _≈_ _≲_
+
+  open IsOmegaChainCompletePointedPartialOrder isOmegaChainCompletePointedPartialOrder public
+
+record OmegaChainCompleteBoundedJoinSemilattice c ℓ₁ ℓ₂ : Set (Level.suc (c ⊔ ℓ₁ ⊔ ℓ₂)) where
   field
     Carrier : Set c
     _≈_     : Rel Carrier ℓ₁
     _≲_     : Rel Carrier ℓ₂
     _∨_     : Op₂ Carrier
     ⊥       : Carrier
-    isEffectiveBoundedJoinSemilattice : IsEffectiveBoundedJoinSemilattice _≈_ _≲_ _∨_ ⊥
+    isOmegaChainCompleteBoundedJoinSemilattice : IsOmegaChainCompleteBoundedJoinSemilattice _≈_ _≲_ _∨_ ⊥
 
-  open IsEffectiveBoundedJoinSemilattice isEffectiveBoundedJoinSemilattice public
+  infix 4 _≈_ _≲_
+  infixr 7 _∨_
 
+  open IsOmegaChainCompleteBoundedJoinSemilattice isOmegaChainCompleteBoundedJoinSemilattice public
+
+{-
+takeFixedPoint : ∀{a ℓ₁ ℓ₂} → {X : Set a} → {_≈_ : Rel X ℓ₁} → {_≲_ : Rel X ℓ₂} →
+  (IsOmegaChainCompletePartialOrder _≈_ _≲_) → (f : X → X) → (IsOrderHomomorphism _≈_ _≈_ _≲_ _≲_ f) → X → Σ X (IsFixedPoint _≈_ f)
+takeFixedPoint {X = X} {_≈_ = _≈_} {_≲_ = _≲_} isωccpo f fIsMonotone z = (fixedPoint , isFixedPoint) where
+  open IsOrderHomomorphism
+  open IsNoetherian
+  open IsOmegaChainCompletePartialOrder
+  s : ℕ → X
+  s = flip (iter f) z
+  sIsNoetherian : IsNoetherian _≈_ _≲_ s
+  sIsNoetherian .isOmegaChain = sIsOmegaChain where
+    sIsOmegaChain : IsOmegaChain _≈_ _≲_ s
+    sIsOmegaChain .mono Nat.z≤n = {! f .mono!}
+    sIsOmegaChain .mono (Nat.s≤s r) = {!!}
+    sIsOmegaChain .cong r = {!!}
+  sIsNoetherian .height = {!!}
+  sIsNoetherian .stabilize i height≲i = {!!}
+  fixedPoint = s (sIsNoetherian . height)
+  isFixedPoint : IsFixedPoint _≈_ f fixedPoint
+  isFixedPoint = {!!} where
+    open import Data.Nat.Properties
+-} 
+  
+
+module _ where
   private
-    C = Carrier
-    record IsLeastFixedPoint (f : C → C) (p : C) : Set (Level.suc (c ⊔ ℓ₁ ⊔ ℓ₂))  where
-      field
-        fixed : IsFixedPoint _≈_ f p
-        least : (x : C) → IsFixedPoint _≈_ f x → p ≲ x
-    IsMonotone = IsOrderHomomorphism _≈_ _≈_ _≲_ _≲_
+    variable
+      a ℓ₁ ℓ₂ : Level
+      X : Set a
+      _≈_ : Rel X ℓ₁ 
+      _≲_ : Rel X ℓ₂
+      ⊥ : X
 
-  lfp : (f : C → C) → IsMonotone f → Σ C (IsLeastFixedPoint f)
-  lfp f f-is-monotone = (p , record
-      { fixed = fixed -- fixed
-      ; least = least
-      }) where
-    chain = flip (iter f) ⊥
-    open IsOrderHomomorphism f-is-monotone
-    chain-is-omega-chain : IsOmegaChain chain _≲_
-    chain-is-omega-chain Nat.zero = minimum (f ⊥)  
-    chain-is-omega-chain (Nat.suc n) = mono (chain-is-omega-chain n)
-    chain-is-noeth : IsNoetherian chain _≈_
-    chain-is-noeth = omega-chain-is-noetherian chain chain-is-omega-chain
-    open IsNoetherian chain-is-noeth
-    p = chain height
-    fixed = sym (stabilize height ≤-refl) where
+  open IsLeastFixedPoint
+  open IsNoetherian
+  open IsOrderHomomorphism
+  open IsOmegaChainCompletePointedPartialOrder
+  lfp : IsOmegaChainCompletePointedPartialOrder _≈_ _≲_ ⊥ → (f : X → X) → IsOrderHomomorphism _≈_ _≈_ _≲_ _≲_ f → Σ X (IsLeastFixedPoint _≈_ _≲_ f)
+  lfp {_≈_ = _≈_} {_≲_ = _≲_} {⊥ = ⊥} isCPPO f fIsMonotone = (p , isLFP) where
+    s = flip (iter f) ⊥
+    sIsNoetherian : IsNoetherian _≈_ _≲_ s
+    sIsNoetherian .isOmegaChain = sIsOmegaChain where
+      sIsOmegaChain : IsOmegaChain _≈_ _≲_ s
+      sIsOmegaChain .mono {y = m} Nat.z≤n = isCPPO .minimum (s m)
+      sIsOmegaChain .mono (Nat.s≤s r) = fIsMonotone .mono (sIsOmegaChain .mono r)
+      sIsOmegaChain .cong _≡_.refl =  isCPPO .isEquivalence .IsEquivalence.refl
+
+    sIsNoetherian .height =  (isCPPO .isOmegaChainComplete s) .height 
+    sIsNoetherian .stabilize =  (isCPPO .isOmegaChainComplete s) .stabilize 
+    p = s (sIsNoetherian . height)
+    isLFP : IsLeastFixedPoint _≈_ _≲_ f p
+    isLFP .isFixedPoint =  isCPPO .isEquivalence .IsEquivalence.sym ((sIsNoetherian .stabilize) (sIsNoetherian .height) ≤-refl) where
       open import Data.Nat.Properties
-      open IsEquivalence isEquivalence
-    least : (x : C) → IsFixedPoint _≈_ f x → p ≲ x
-    least x fx≈x =  ≤-respʳ-≈ fⁿx≈x fⁿ⊥≲fⁿx  where
-      fⁿ⊥≲fⁿx = iter-mono f f-is-monotone height ⊥ x (minimum x)
-      fⁿx≈x = iter-fixed f isEquivalence Eq.isRelHomomorphism height x fx≈x
+    isLFP .least x fx≈x = fⁿ⊥≲x where
+      fⁿ⊥≲fⁿx = iter-mono f fIsMonotone (sIsNoetherian .height) ⊥ x (isCPPO .minimum x)
+      fⁿx≈x = iter-fixed f (isCPPO .isEquivalence) (Eq.isRelHomomorphism fIsMonotone) (sIsNoetherian .height) x fx≈x
+      fⁿ⊥≲x = isCPPO .trans  fⁿ⊥≲fⁿx (isCPPO .reflexive fⁿx≈x) 
+
+module _ where
+  private
+    variable
+      a b ℓ₁ ℓ₂ : Level
+      A : Set a
+      B : Set b
+
+  _×ᴿ_ : Rel A ℓ₁ → Rel B ℓ₂ → Rel (A × B) (ℓ₁ ⊔ ℓ₂)
+  (R ×ᴿ Q) (a , b) (a' , b') = R a a' × Q b b'
+
+  _→ᴿ_ : {a : Level} → {A : Set a} → Rel A ℓ₁ → Rel B ℓ₂ → Rel (A → B) (a ⊔ ℓ₁ ⊔ ℓ₂)
+  _→ᴿ_ {a = a} {A = A} R Q f f' = (x x' : A) → R x x' → Q (f x) (f' x')
+
