@@ -26,6 +26,7 @@ import Category.Monad.State using (IStateT ; StateTIMonad)
 import Category.Monad.Continuation using (DContT ; DContIMonad)
 import Relation.Binary.PropositionalEquality
 import Relation.Binary
+import Relation.Binary.Morphism
 import Relation.Unary
 
 module _ where
@@ -219,12 +220,19 @@ record RawGMonad {i j : Level} (M : Set i → Set j) : Set (suc i ⊔ suc j) whe
   open RawGApplicative rawGApplicative public
 
 open Relation.Binary
+open Relation.Binary.Morphism
 
 record RawGPomonad {i j k} (M : Set i → Set j) (_≈_ : ∀{A} → Rel (M A) k) (_≲_ : ∀{A} → Rel (M A) k) : Set (suc i ⊔ suc j ⊔ k) where
   field
     rawGMonad : RawGMonad M
     isPartialOrder : ∀{A} → IsPartialOrder (_≈_ {A}) (_≲_ {A})
+
+  open RawGMonad rawGMonad public
   open IsPartialOrder public
+
+  field
+    return-isOrderHomomorphism : ∀{A B} → ∀ (w : A → M B) → IsOrderHomomorphism (_≈_ {A}) (_≈_ {B}) (_≲_ {A}) (_≲_ {B}) (_>>= w)
+    >>=-isOrderHomomorphism : ∀{A B} → ∀ (w : M A) → IsOrderHomomorphism (λ f f' → (a : A) → f a ≈ f' a) (_≈_ {B}) (λ f f' → (a : A) → f a ≲ f' a) (_≲_ {B}) (w >>=_)
 
 open Relation.Unary renaming (Pred to Pred')
 
@@ -250,10 +258,12 @@ module _ where
   open Relation.Unary renaming (Pred to Pred')
   open Relation.Binary.PropositionalEquality
   open Function
+  open Product
+  open Sum
   _≐_ : ∀{a b A} → Pred {a} {b} A → Pred {a} {b} A → Set _
   P ≐ Q = (P ⊆ Q) × (Q ⊆ P)
 
-  ≐-isEquivalence : ∀{a b A} →  IsEquivalence {A = Pred {a} {b} A} _≐_
+  ≐-isEquivalence : ∀{a b A} → IsEquivalence {A = Pred {a} {b} A} _≐_
   ≐-isEquivalence = record
     { refl =  (id , id)
     ; sym = Product.swap
@@ -263,20 +273,28 @@ module _ where
   ⊆-isPartialOrder : ∀{a b A} → IsPartialOrder {A = Pred {a} {b} A}_≐_ _⊆_
   ⊆-isPartialOrder = record
     { isPreorder = record
-        { isEquivalence = ≐-isEquivalence
-        ; reflexive = proj₁
-        ; trans = λ p q → q ∘ p
-        }
+      { isEquivalence = ≐-isEquivalence
+      ; reflexive = proj₁
+      ; trans = λ p q → q ∘ p
+      }
     ; antisym = (_,_) 
     }
 
   powersetMonad : ∀{i} → RawGPomonad (Pred {i} {i}) _≐_ _⊆_
   powersetMonad = record
     { rawGMonad = record
-        { return = _≡_
-        ; _>>=_ = λ m f b → ∃ λ a → m a × f a b
-        }
+      { return = _≡_
+      ; _>>=_ = λ m f b → ∃ λ a → m a × f a b
+      }
     ; isPartialOrder = ⊆-isPartialOrder
+    ; return-isOrderHomomorphism = λ w → record
+      { cong = λ eq → ((λ ( a , pa , qab ) → ( a , proj₁ eq pa , qab )) , (λ( a , pa , qab ) → ( a , proj₂ eq pa , qab ))) 
+      ; mono = λ imp →  λ ( a , pa , qab ) → ( a  , imp pa , qab )
+      }
+    ; >>=-isOrderHomomorphism = λ w → record
+      { cong = λ aeq → (((λ ( a , pa , qab) → (a ,  pa , proj₁ (aeq a) qab))) , (λ ( a , pa , qab) → (a ,  pa ,  proj₂ (aeq a) qab )))
+      ; mono = λ imp → λ (a , pa , qab ) → ( a , pa , imp a qab ) 
+      }
     }
 
   contraPowersetMonad : ∀{i} → RawGPomonad (Pred {i} {i}) _≐_ _⊆_
@@ -286,6 +304,8 @@ module _ where
         ; _>>=_ = λ m f b → ∀ a → m a → f a b
         }
     ; isPartialOrder = ⊆-isPartialOrder
+    ; return-isOrderHomomorphism = {!!}
+    ; >>=-isOrderHomomorphism = {!!}
     }
 
   forwardMonad : ∀{i} → RawGPomonad (Forward {i} {i}) _≐_ _⊆_
@@ -295,6 +315,8 @@ module _ where
         ; _>>=_ = λ m f → λ {(p , b) → ∀ a → m (p , a) → f a (p , b)}
         }
     ; isPartialOrder = ⊆-isPartialOrder
+    ; return-isOrderHomomorphism = {!!}
+    ; >>=-isOrderHomomorphism = {!!}
     }
 
   backwardMonad : ∀{i} → RawGPomonad (Backward {i} {i}) _≐_ _⊆_
@@ -304,6 +326,8 @@ module _ where
         ; _>>=_ = λ c f k → c (flip f k)
         }
     ; isPartialOrder = ⊆-isPartialOrder
+    ; return-isOrderHomomorphism = {!!}
+    ; >>=-isOrderHomomorphism = {!!}
     }
 
   bidirectionalMonad : ∀{i} → RawGPomonad (Bidirectional {i} {i}) _≐_ _⊆_
@@ -313,4 +337,7 @@ module _ where
         ; _>>=_ = λ c f → λ{ (p , k) → c (p , flip f ((p , k)))}
         }
     ; isPartialOrder = ⊆-isPartialOrder
+    ; return-isOrderHomomorphism = {!!}
+    ; >>=-isOrderHomomorphism = {!!}
     }
+
