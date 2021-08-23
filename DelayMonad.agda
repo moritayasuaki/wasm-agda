@@ -1,3 +1,4 @@
+{-# OPTIONS --guardedness #-}
 module DelayMonad where
 
 open import Category.Monad
@@ -27,4 +28,3 @@ module _ where
 
   return monad∞Delay x = record { force = now x }
   ∞Delay.force ((monad∞Delay >>= x) f) = _>>=_ monadDelay (later x) λ x → later (f x)
-
