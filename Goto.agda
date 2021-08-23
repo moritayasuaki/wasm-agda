@@ -27,6 +27,8 @@ import Relation.Binary
 import Relation.Binary.PropositionalEquality as PropositionalEquality
 import Relation.Nullary.Decidable as Decidable
 
+
+
 module Syntax where
   open Product
   data Ops (Var : Set) : Set where
@@ -54,3 +56,5 @@ module Syntax where
 
   Config : Set → Set → Set
   Config Label Var = Code Label Var × Stmts Label Var × Store Var
+
+  open import Monad
