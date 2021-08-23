@@ -219,6 +219,10 @@ record RawGMonad {i j : Level} (M : Set i → Set j) : Set (suc i ⊔ suc j) whe
 
   open RawGApplicative rawGApplicative public
 
+
+join : ∀{i} → {A : Set i} → {M : Set i → Set i} → {RawGMonad M} → M (M A) → M A
+join {_} {_} {_} {mo} mma =  let open RawGMonad mo in mma >>= Function.id
+
 open Relation.Binary
 open Relation.Binary.Morphism
 
@@ -231,8 +235,8 @@ record RawGPomonad {i j k} (M : Set i → Set j) (_≈_ : ∀{A} → Rel (M A) k
   open IsPartialOrder public
 
   field
-    return-isOrderHomomorphism : ∀{A B} → ∀ (w : A → M B) → IsOrderHomomorphism (_≈_ {A}) (_≈_ {B}) (_≲_ {A}) (_≲_ {B}) (_>>= w)
-    >>=-isOrderHomomorphism : ∀{A B} → ∀ (w : M A) → IsOrderHomomorphism (λ f f' → (a : A) → f a ≈ f' a) (_≈_ {B}) (λ f f' → (a : A) → f a ≲ f' a) (_≲_ {B}) (w >>=_)
+    isOrderHomomorphismL : ∀{A B} → ∀ (w : A → M B) → IsOrderHomomorphism (_≈_ {A}) (_≈_ {B}) (_≲_ {A}) (_≲_ {B}) (_>>= w)
+    isOrderHomomorphismR : ∀{A B} → ∀ (w : M A) → IsOrderHomomorphism (λ f f' → (a : A) → f a ≈ f' a) (_≈_ {B}) (λ f f' → (a : A) → f a ≲ f' a) (_≲_ {B}) (w >>=_)
 
 open Relation.Unary renaming (Pred to Pred')
 
@@ -287,11 +291,11 @@ module _ where
       ; _>>=_ = λ m f b → ∃ λ a → m a × f a b
       }
     ; isPartialOrder = ⊆-isPartialOrder
-    ; return-isOrderHomomorphism = λ w → record
+    ; isOrderHomomorphismL = λ w → record
       { cong = λ eq → ((λ ( a , pa , qab ) → ( a , proj₁ eq pa , qab )) , (λ( a , pa , qab ) → ( a , proj₂ eq pa , qab ))) 
       ; mono = λ imp →  λ ( a , pa , qab ) → ( a  , imp pa , qab )
       }
-    ; >>=-isOrderHomomorphism = λ w → record
+    ; isOrderHomomorphismR = λ w → record
       { cong = λ aeq → (((λ ( a , pa , qab) → (a ,  pa , proj₁ (aeq a) qab))) , (λ ( a , pa , qab) → (a ,  pa ,  proj₂ (aeq a) qab )))
       ; mono = λ imp → λ (a , pa , qab ) → ( a , pa , imp a qab ) 
       }
@@ -304,8 +308,8 @@ module _ where
         ; _>>=_ = λ m f b → ∀ a → m a → f a b
         }
     ; isPartialOrder = ⊆-isPartialOrder
-    ; return-isOrderHomomorphism = {!!}
-    ; >>=-isOrderHomomorphism = {!!}
+    ; isOrderHomomorphismL = {!!}
+    ; isOrderHomomorphismR = {!!}
     }
 
   forwardMonad : ∀{i} → RawGPomonad (Forward {i} {i}) _≐_ _⊆_
@@ -315,8 +319,8 @@ module _ where
         ; _>>=_ = λ m f → λ {(p , b) → ∀ a → m (p , a) → f a (p , b)}
         }
     ; isPartialOrder = ⊆-isPartialOrder
-    ; return-isOrderHomomorphism = {!!}
-    ; >>=-isOrderHomomorphism = {!!}
+    ; isOrderHomomorphismL = {!!}
+    ; isOrderHomomorphismR = {!!}
     }
 
   backwardMonad : ∀{i} → RawGPomonad (Backward {i} {i}) _≐_ _⊆_
@@ -326,8 +330,8 @@ module _ where
         ; _>>=_ = λ c f k → c (flip f k)
         }
     ; isPartialOrder = ⊆-isPartialOrder
-    ; return-isOrderHomomorphism = {!!}
-    ; >>=-isOrderHomomorphism = {!!}
+    ; isOrderHomomorphismL = {!!}
+    ; isOrderHomomorphismR = {!!}
     }
 
   bidirectionalMonad : ∀{i} → RawGPomonad (Bidirectional {i} {i}) _≐_ _⊆_
@@ -337,7 +341,6 @@ module _ where
         ; _>>=_ = λ c f → λ{ (p , k) → c (p , flip f ((p , k)))}
         }
     ; isPartialOrder = ⊆-isPartialOrder
-    ; return-isOrderHomomorphism = {!!}
-    ; >>=-isOrderHomomorphism = {!!}
+    ; isOrderHomomorphismL = {!!}
+    ; isOrderHomomorphismR = {!!}
     }
-
