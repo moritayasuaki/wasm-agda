@@ -121,7 +121,10 @@ module _ where
         ; _>>=_ = λ m f b → ∀ a → m a → f a b
         }
     ; isPartialOrder = ⊆-isPartialOrder
-    ; isOrderHomomorphismL = {!!}
+    ; isOrderHomomorphismL =  λ w → record
+      { cong =  λ aeq →  ( ( λ b a ya → {! !}) ,  λ b a ya → {!!} )
+      ; mono =  λ imp → λ p a ya → {! imp (p a)!}
+      }
     ; isOrderHomomorphismR = {!!}
     }
 
@@ -132,7 +135,7 @@ module _ where
         ; _>>=_ = λ m f → λ {(p , b) → ∀ a → m (p , a) → f a (p , b)}
         }
     ; isPartialOrder = ⊆-isPartialOrder
-    ; isOrderHomomorphismL = {!!}
+    ; isOrderHomomorphismL =  λ w → record {cong =  λ (p , q) →  ( ( λ d d' y → d d' (q y )) ,  λ d d' y →  d d' (p y) )  ; mono =  λ imp → {!!} }
     ; isOrderHomomorphismR = {!!}
     }
 

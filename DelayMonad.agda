@@ -1,4 +1,4 @@
-{-# OPTIONS --guardedness #-}
+{-# OPTIONS --guardedness --cubical #-}
 module DelayMonad where
 
 open import Category.Monad
@@ -28,3 +28,16 @@ module _ where
 
   return monad∞Delay x = record { force = now x }
   ∞Delay.force ((monad∞Delay >>= x) f) = _>>=_ monadDelay (later x) λ x → later (f x)
+
+open import Data.Sum
+record Partiality (A : Set) : Set where
+  constructor thunk
+  coinductive
+  field
+    force : Partiality A ⊎ A
+
+open Category.Monad.Indexed.RawIMonad
+monadPartiality : RawMonad Partiality
+Partiality.force (return monadPartiality x) = inj₂ x
+Partiality.force (_>>=_ monadPartiality m f) with m
+... | t = {! t !}
