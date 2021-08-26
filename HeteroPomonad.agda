@@ -1,4 +1,4 @@
-module HPomonad where
+module HeteroPomonad where
 
 open import Level
 open import HeteroMonad
@@ -26,6 +26,7 @@ record HPomonad (M : Set i → Set j) : Set (suc (i ⊔ j)) where
 HPomonadT : ((Set i → Set j) → (Set k → Set l)) → Set (suc (i ⊔ j ⊔ k ⊔ l))
 HPomonadT T = ∀{M} → HPomonad M → HPomonad (T M)
 
+{-
 enrichTriv : {M : Set i → Set j} → HMonad M → HPomonad M
 enrichTriv HMon = let open HMonad HMon in record 
   { hMonad = HMon
@@ -39,4 +40,4 @@ enrichTriv HMon = let open HMonad HMon in record
     }
   } where open import Relation.Binary.PropositionalEquality using (_≡_) renaming  (cong to ≡-cong ; cong₂ to ≡-cong₂ ; refl to ≡-refl)
           open import Function
-
+-}

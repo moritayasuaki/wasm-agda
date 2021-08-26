@@ -21,16 +21,16 @@ private
     C : Set c
     I : Set i
 
-open import OMonad
+open import HetroPomonad
 open import Category.Monad.Reader
 
 -- TraceT M A = ℕ → M A, where a parameter of natural number states transition counter 
 TraceT : (Set f → Set f) → Set f → Set f
 TraceT {f = f} = ReaderT ℕ f
 
--- MTraceT M A = {f : ℕ → M A | f is a monotone function } 
-OTraceT : ∀{g h} → (M : Set f → Set f) → FRel {f} M g → FRel {f} M h → Set f → Set _
-OTraceT M E O A = ∃ (IsOrderHomomorphism _≡_ (E A) _≤_ (O A))
+-- ChainTraceT M A = {f : ℕ → M A | f is a isotonic function } 
+ChainTraceT : ∀{g h} → (M : Set f → Set f) → FRel {f} M g → FRel {f} M h → Set f → Set _
+ChainTraceT M E O A = ∃ (IsOrderHomomorphism _≡_ (E A) _≤_ (O A))
 
 TraceTMonad : ∀{f M} → RawMonad M → RawMonad (TraceT M)
 TraceTMonad {f = f} Mon = ReaderTMonad ℕ f Mon

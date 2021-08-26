@@ -21,9 +21,6 @@ private
     P : Set j
     M F : Set i → Set j
 
-
-open import Relation.Unary hiding (∅ ; U)
-
 Forward : Set i → (j : Level) → Set (i ⊔ suc j)
 Forward A j = Pred (Set j × A) j -- (P × A) → P
 

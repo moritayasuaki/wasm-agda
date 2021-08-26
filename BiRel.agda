@@ -95,22 +95,39 @@ module FunExt
     hasPartialOrderT : HasPartialOrder B ℓ → HasPartialOrder (funext B) _
     hasPartialOrderT o = record { E = relT E; O = relT O; isPartialOrder = partialorderT B E O isPartialOrder} where open HasPartialOrder o
 
--- monotone function
-record IsMonotone {A : Set a} {B : Set b} (RA : HasOrder A ℓ) (RB : HasOrder B ℓ)
-    (f : A → B) : Set (a ⊔ b ⊔ ℓ) where
-  open HasOrder
-  field
-    cong : ∀{a a'} → RA .E a a' → RB .E (f a) (f a')
-    mono : ∀{a a'} → RA .O a a' → RB .O (f a) (f a')
 
--- monotone with respect to 2 arguments
-record IsBimonotone {A : Set a} {B : Set b} {C : Set c}
-    (RA : HasOrder A ℓ) (RB : HasOrder B ℓ) (RC : HasOrder C ℓ)
-    (f : A → B → C) : Set (a ⊔ b ⊔ c ⊔ ℓ) where
-  open HasOrder
-  field
-    cong₂ : ∀{a a' b b'} → RA .E a a' → RB .E b b' → RC .E (f a b) (f a' b')
-    mono₂ : ∀{a a' b b'} → RA .O a a' → RB .O b b' → RC .O (f a b) (f a' b')
+module _ where
+  private
+    variable
+      A : Set a
+      B : Set b
+      C : Set c
+  -- monotone function
+  record IsMonotone {A : Set a} {B : Set b}
+    (RA : HasPreorder A ℓ) (RB : HasPreorder B ℓ) (f : A → B) : Set (a ⊔ b ⊔ ℓ) where
+    open HasPreorder
+    field
+      cong : ∀{a a'} → RA .E a a' → RB .E (f a) (f a')
+      mono : ∀{a a'} → RA .O a a' → RB .O (f a) (f a')
+
+  -- monotone with respect to 2 arguments
+  record IsBimonotone {A : Set a} {B : Set b} {C : Set c}
+    (RA : HasPreorder A ℓ) (RB : HasPreorder B ℓ) (RC : HasPreorder C ℓ) (f : A → B → C) : Set (a ⊔ b ⊔ c ⊔ ℓ) where
+    open HasPreorder
+    field
+      cong₂ : ∀{a a' b b'} → RA .E a a' → RB .E b b' → RC .E (f a b) (f a' b')
+      mono₂ : ∀{a a' b b'} → RA .O a a' → RB .O b b' → RC .O (f a b) (f a' b')
+
+  -- this can not be proved .. I think this phenomenon relates to bidirectional analysis and back/forward transfer function vs pre-post relation analysis
+  {-
+  pairwisemonotone⇒bimonotone : (RA : HasPreorder A ℓ) (RB : HasPreorder B ℓ) (RC : HasPreorder C ℓ) (_*_ : A → B → C)
+    → ((a : A) → IsMonotone RB RC (a *_)) → ((b : B) → IsMonotone RA RC (_* b)) → IsBimonotone RA RB RC (_*_)
+  pairwisemonotone⇒bimonotone RA RB RC _*_ R L = record
+    { cong₂ = λ Ebb Eaa → {! cong   !}
+    ; mono₂ = {!   !}
+    }
+    where open IsMonotone
+  -}
 
 IsExtensive : {A : Set a} → Rel A ℓ → (A → A) → Set (a ⊔ ℓ)
 IsExtensive _≲_ f = ∀ a → a ≲ f a
