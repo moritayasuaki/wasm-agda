@@ -1,25 +1,48 @@
 module HPomonad where
 
+open import Level
 open import HMonad
 open import Order
 
-private
-  variable
-    i j k : Level
-    A B C : Set i
-
-PointwiseOrder : {i a : Level} {I : Set i} → IFun I a → (ℓ ℓ' : Level) → Set _
-PointwiseOrder {a = a} {I = I} M ℓ ℓ' = (i j : I) → (A : Set a) → Poset (M i j A) ℓ ℓ'
-
-record HPomonad (M : Set i → Set j) : Set (suc (i ⊔ j)) where
+-- j is level of space of logic. it is used for relation (order and equivalence) and predicate
+record HPomonad {i j : Level} (M : Set i → Set j) : Set (suc (i ⊔ j)) where
   field
     hMonad : HMonad M
-    PwRawPoset : PwRawPoset M ℓ ℓ'
-  open RawIMonad rawIMonad
+    hasPointwiseOrder : HasPointwiseOrder M j
+  open HMonad.HMonad hMonad
 
-  fwRawPoset : (i j : I) → (A B : Set a) → RawPoset (A → (M i j B)) (a ⊔ ℓ) (a ⊔ ℓ')
-  fwRawPoset i j A B = funextPoset A (pwRawPoset i j B)
+  F : Set i → Set i → Set (i ⊔ j)
+  F A B = A → M B
+
+  hasPairwiseOrder : HasPairwiseOrder F (i ⊔ j)
+  hasPairwiseOrder A B = funextOrder A (hasPointwiseOrder B)
 
   field
-    pwBimonotone : ∀{i j k} {A B C : Set a} → IsBimonotone (fwRawPoset i j A B) (fwRawPoset j k B C) (fwRawPoset i k A C) _>=>_
+    isBimonotone : {A B C : Set i} → IsBimonotone (hasPairwiseOrder A B) (hasPairwiseOrder B C) (hasPairwiseOrder A C) _>=>_
 
+private
+  variable
+    i j k l : Level
+
+HPomonadT : ((Set i → Set j) → (Set k → Set l)) → Set (suc (i ⊔ j ⊔ k ⊔ l))
+HPomonadT T = ∀{M} → HPomonad M → HPomonad (T M)
+
+open import Category.Monad
+
+lift2 : (T : (Set i → Set i) → (Set i → Set i)) → RawMonadT T → HPomonadT T
+lift2 T MT record 
+  { hMonad = record
+    { return = return
+    ; _>>=_ = _>>=_
+    }
+  ; hasPointwiseOrder = hasPointwiseOrder
+  ; isBimonotone = isBimonotone
+  } with MT (record { return = return ; _>>=_ = _>>=_})
+... | record { return = return' ; _>>=_ = _>>='_ } = record
+  { hMonad = record 
+    { return = return'
+    ; _>>=_ = _>>='_
+    }
+  ; hasPointwiseOrder = λ A → {!  hasPointwiseOrder A  !}
+  ; isBimonotone = {!   !}
+  }

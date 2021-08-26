@@ -6,88 +6,113 @@ open import Relation.Binary.Morphism
 
 private
   variable
-    a b c ℓ : Level
+    a b c ℓ ℓ' : Level
 
-record HasOrder (A : Set a) (ℓ : Level) : Set (a ⊔ suc ℓ) where
+record IsOrder {a ℓ ℓ₂ : Level} {A : Set a} (_≈_ : Rel A ℓ) (_~_ : Rel A ℓ₂) : Set (a ⊔ ℓ ⊔ ℓ₂) where
   field
-    E : Rel A ℓ
-    O : Rel A ℓ
+    isPartialEquivalence : IsPartialEquivalence _≈_
+    trans : Transitive _~_
+    refl : _≈_ ⇒ _~_
+    antisym : Antisymmetric _≈_ _~_ 
 
-record HasPreorder (A : Set a) (ℓ : Level) : Set (a ⊔ suc ℓ) where
+record HasPartialEquivalence (A : Set a) (ℓ : Level) : Set (a ⊔ suc ℓ) where
   field
-    hasOrder : HasOrder A ℓ
-  open HasOrder hasOrder
-  field
-    isPreorder : IsPreorder E O
-  open HasOrder hasOrder public
+    P : Rel A ℓ
+    isPartialEquivalence : IsPartialEquivalence P
 
-record HasPartialOrder (A : Set a) (ℓ : Level) : Set (a ⊔ suc ℓ) where
-  field
-    hasOrder : HasOrder A ℓ
-  open HasOrder hasOrder
-  field
-    isPartialOrder : IsPartialOrder E O
-  open HasOrder hasOrder public
+module _{a : Level} (A : Set a) (ℓ : Level) where
+  record HasOrder : Set (a ⊔ suc ℓ) where
+    field
+      E : Rel A ℓ
+      O : Rel A ℓ
 
-open import Relation.Unary
+  record HasPreorder : Set (a ⊔ suc ℓ) where
+    field
+      hasOrder : HasOrder
+    open HasOrder hasOrder
+    field
+      isPreorder : IsPreorder E O
+    open HasOrder hasOrder public
 
+  record HasPartialOrder : Set (a ⊔ suc ℓ) where
+    field
+      hasOrder : HasOrder
+    open HasOrder hasOrder
+    field
+      isPartialOrder : IsPartialOrder E O
+    open HasOrder hasOrder public
 
-funextRel : {P : Set ℓ} → (A : Set a) → Rel P ℓ → Rel (A → P) (a ⊔ ℓ)
-funextRel A R f g = (x : A) → R (f x) (g x)
+RelT : (T : Set a → Set b) → (ℓ ℓ' : Level) → Set (suc (a ⊔ ℓ ⊔ ℓ') ⊔ b)
+RelT T ℓ ℓ' = ∀{A} → Rel A ℓ → Rel (T A) ℓ'
 
-module FunextProperties {P : Set ℓ} (A : Set a) {R : Rel P ℓ} {R' : Rel P ℓ} where
-  ext : Rel P ℓ → Rel (A → P) (a ⊔ ℓ)
-  ext = funextRel A
+module FunExt
+  {a : Level} -- level of base type
+  (A : Set a) -- a type to be used to extend
+  (ℓ : Level) -- lower bound of the level of relation
+  where
 
-  prefl : Reflexive R → Reflexive (ext R)
-  prefl refl a = refl
+  funext : Set b → Set (a ⊔ b)
+  funext B = A → B
 
-  psym : Symmetric R → Symmetric (ext R)
-  psym sym aij a = sym (aij a)
+  relT : {b : Level} → RelT (funext {b = b}) ℓ (a ⊔ ℓ)
+  relT R f g = (x : A) → R (f x) (g x)
 
-  ptrans : Transitive R → Transitive (ext R)
-  ptrans trans aij ajk a = trans (aij a) (ajk a)
+  module _ (R : Rel A ℓ) where
 
-  potrans : Transitive R' → Transitive (ext R')
-  potrans trans aij ajk a = trans (aij a) (ajk a)
+    reflT : Reflexive R → Reflexive (relT R)
+    reflT refl a = refl
 
-  pantisym : Antisymmetric R R' → Antisymmetric (ext R) (ext R')
-  pantisym antisym aij aji a = antisym (aij a) (aji a)
+    symT : Symmetric R → Symmetric (relT R)
+    symT sym aij a = sym (aij a)
 
-  pequiv : IsEquivalence R → IsEquivalence (ext R)
-  IsEquivalence.refl (pequiv record { refl = refl ; sym = sym ; trans = trans }) = prefl refl
-  IsEquivalence.sym (pequiv record { refl = refl ; sym = sym ; trans = trans }) = psym sym
-  IsEquivalence.trans (pequiv record { refl = refl ; sym = sym ; trans = trans }) = ptrans trans
+    transT : Transitive R → Transitive (relT R)
+    transT trans aij ajk a = trans (aij a) (ajk a)
 
-  ppreorder : IsPreorder R R' → IsPreorder (ext R) (ext R')
-  IsPreorder.isEquivalence (ppreorder record { isEquivalence = isEquivalence ; reflexive = reflexive ; trans = trans }) = pequiv isEquivalence
-  IsPreorder.reflexive (ppreorder record { isEquivalence = isEquivalence ; reflexive = reflexive ; trans = trans }) = λ f a → reflexive (f a)
-  IsPreorder.trans (ppreorder record { isEquivalence = isEquivalence ; reflexive = reflexive ; trans = trans }) = potrans trans
+  module _ (R R' : Rel A ℓ) where
+    antisymT : Antisymmetric R R' → Antisymmetric (relT R) (relT R')
+    antisymT antisym aij aji a = antisym (aij a) (aji a)
 
-  ppartialorder : IsPartialOrder R R' → IsPartialOrder  (ext R) (ext R')
-  IsPartialOrder.isPreorder (ppartialorder record { isPreorder = isPreorder ; antisym = antisym }) = ppreorder isPreorder
-  IsPartialOrder.antisym (ppartialorder record { isPreorder = isPreorder ; antisym = antisym }) = pantisym antisym
+    oreflT : R ⇒ R' → (relT R) ⇒ (relT R')
+    oreflT orefl aij a = orefl (aij a)
 
-funextOrder : {P : Set ℓ} → (A : Set a) → HasOrder P ℓ → HasOrder (A → P) (a ⊔ ℓ)
-funextOrder A record { E = E ; O = O } = record { E = funextRel A E ; O = funextRel A O }
+    pequivT : IsPartialEquivalence R → IsPartialEquivalence (relT R)
+    pequivT pe = record { sym = symT R sym ; trans = transT R trans} where open IsPartialEquivalence pe
 
-funextPreorder : {P : Set ℓ} → (A : Set a) → HasPreorder P ℓ → HasPreorder (A → P) (a ⊔ ℓ)
-funextPreorder A record
-  { hasOrder = hasOrder
-  ; isPreorder = isPreorder
-  } = record 
-  { hasOrder = funextOrder A hasOrder
-  ; isPreorder = FunextProperties.ppreorder A isPreorder
-  }
+    equivT : IsEquivalence R → IsEquivalence (relT R)
+    equivT e = record { refl = reflT R refl ; sym = symT R sym ; trans = transT R trans} where open IsEquivalence e
 
-funextPartialOrder : {P : Set ℓ} → (A : Set a) → HasPartialOrder P ℓ → HasPartialOrder (A → P) (a ⊔ ℓ)
-funextPartialOrder A record
-  { hasOrder = hasOrder
-  ; isPartialOrder = isPartialOrder
-  } = record
-  { hasOrder = funextOrder A hasOrder
-  ; isPartialOrder = FunextProperties.ppartialorder A isPartialOrder
-  }
+    preorderT : IsPreorder R R' → IsPreorder (relT R) (relT R')
+    preorderT pre = record { isEquivalence = equivT isEquivalence ; reflexive = oreflT reflexive ; trans = transT R' trans} where open IsPreorder pre
+
+    partialorderT : IsPartialOrder R R' → IsPartialOrder  (relT R) (relT R')
+    partialorderT po = record { isPreorder = preorderT isPreorder ; antisym = antisymT antisym} where open IsPartialOrder po
+
+  hasOrderT : HasOrder A ℓ → HasOrder (funext A) _
+  hasOrderT record 
+    { E = E
+    ; O = O
+    } = record 
+    { E = relT E
+    ; O = relT O
+    }
+
+  hasPreorderT : HasPreorder A ℓ → HasPreorder (funext A) _
+  hasPreorderT record
+    { hasOrder = hasOrder
+    ; isPreorder = isPreorder
+    } = record 
+    { hasOrder = hasOrderT hasOrder
+    ; isPreorder = preorderT E O isPreorder
+    } where open HasOrder hasOrder
+
+  hasPartialOrderT : HasPartialOrder A ℓ → HasPartialOrder (funext A) _
+  hasPartialOrderT record
+    { hasOrder = hasOrder
+    ; isPartialOrder = isPartialOrder
+    } = record
+    { hasOrder = hasOrderT hasOrder
+    ; isPartialOrder = partialorderT E O isPartialOrder
+    } where open HasOrder hasOrder
 
 -- monotone function
 record IsMonotone {A : Set a} {B : Set b} (RA : HasOrder A ℓ) (RB : HasOrder B ℓ)
@@ -115,27 +140,21 @@ record IsExterierOperator {A : Set a} (O : Rel A ℓ) (ext : A → A) : Set (a �
     isRelHomomorphism : IsRelHomomorphism O O ext
   open IsRelHomomorphism isRelHomomorphism public
 
+-- objectwise order
+HasPointwiseOrder : (Set a → Set b) → (ℓ : Level) → Set _
+HasPointwiseOrder M ℓ = ∀ A → HasOrder (M A) ℓ
 
+HasPointwisePreorder : (Set a → Set b) → (ℓ : Level) → Set _
+HasPointwisePreorder M ℓ = ∀ A → HasPreorder (M A) ℓ
 
-{-
-open import Category.Monad.Indexed
+HasPointwisePartialOrder : (Set a → Set b) → (ℓ : Level) → Set _
+HasPointwisePartialOrder M ℓ = ∀ A → HasPartialOrder (M A) ℓ
 
-PwRawPoset : {i a : Level} {I : Set i} → IFun I a → (ℓ ℓ' : Level) → Set _
-PwRawPoset {a = a} {I = I} M ℓ ℓ' = (i j : I) → (A : Set a) → RawPoset (M i j A) ℓ ℓ'
+HasPairwiseOrder : (Set a → Set a → Set b) → (ℓ : Level) → Set _
+HasPairwiseOrder F ℓ = ∀ A B → HasOrder (F A B) ℓ
 
-record RawIPomonad {i a : Level} {I : Set i} (M :  IFun I a) (ℓ ℓ' : Level) : Set (i ⊔ suc a ⊔ suc ℓ ⊔ suc ℓ') where
-  field
-    rawIMonad : RawIMonad M
-    pwRawPoset : PwRawPoset M ℓ ℓ'
-  open RawIMonad rawIMonad
+HasPairwisePreorder : (Set a → Set a → Set b) → (ℓ : Level) → Set _
+HasPairwisePreorder F ℓ = ∀ A B → HasPreorder (F A B) ℓ
 
-  fwRawPoset : (i j : I) → (A B : Set a) → RawPoset (A → (M i j B)) (a ⊔ ℓ) (a ⊔ ℓ')
-  fwRawPoset i j A B = funextPoset A (pwRawPoset i j B)
-
-  field
-    pwBimonotone : ∀{i j k} {A B C : Set a} → IsBimonotone (fwRawPoset i j A B) (fwRawPoset j k B C) (fwRawPoset i k A C) _>=>_
-
-
-RawIPomonadT : {i a : Level} {I : Set i} → (IFun I a → IFun I a) → (ℓ ℓ' ℓ'' ℓ''' : Level) → Set _
-RawIPomonadT T ℓ ℓ' ℓ'' ℓ''' = ∀ {M} → RawIPomonad M ℓ ℓ' → RawIPomonad (T M) ℓ'' ℓ'''
--}
+HasPairwisePartialOrder : (Set a → Set a → Set b) → (ℓ : Level) → Set _
+HasPairwisePartialOrder F ℓ = ∀ A B → HasPartialOrder (F A B) ℓ
