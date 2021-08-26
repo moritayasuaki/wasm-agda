@@ -1,4 +1,4 @@
-module Order where
+module BiRel where
 
 open import Level
 open import Relation.Binary
@@ -8,7 +8,7 @@ private
   variable
     a b c ℓ ℓ' : Level
 
-record IsOrder {a ℓ ℓ₂ : Level} {A : Set a} (_≈_ : Rel A ℓ) (_~_ : Rel A ℓ₂) : Set (a ⊔ ℓ ⊔ ℓ₂) where
+record IsOrder {A : Set a} (_≈_ : Rel A ℓ) (_~_ : Rel A ℓ') : Set (a ⊔ ℓ ⊔ ℓ') where
   field
     isPartialEquivalence : IsPartialEquivalence _≈_
     trans : Transitive _~_
@@ -20,7 +20,7 @@ record HasPartialEquivalence (A : Set a) (ℓ : Level) : Set (a ⊔ suc ℓ) whe
     P : Rel A ℓ
     isPartialEquivalence : IsPartialEquivalence P
 
-module _{a : Level} (A : Set a) (ℓ : Level) where
+module _ (A : Set a) (ℓ : Level) where
   record HasOrder : Set (a ⊔ suc ℓ) where
     field
       E : Rel A ℓ
@@ -28,25 +28,22 @@ module _{a : Level} (A : Set a) (ℓ : Level) where
 
   record HasPreorder : Set (a ⊔ suc ℓ) where
     field
-      hasOrder : HasOrder
-    open HasOrder hasOrder
-    field
+      E : Rel A ℓ
+      O : Rel A ℓ
       isPreorder : IsPreorder E O
-    open HasOrder hasOrder public
+    open IsPreorder isPreorder public
 
   record HasPartialOrder : Set (a ⊔ suc ℓ) where
     field
-      hasOrder : HasOrder
-    open HasOrder hasOrder
-    field
+      E : Rel A ℓ
+      O : Rel A ℓ
       isPartialOrder : IsPartialOrder E O
-    open HasOrder hasOrder public
+    open IsPartialOrder isPartialOrder public
 
 RelT : (T : Set a → Set b) → (ℓ ℓ' : Level) → Set (suc (a ⊔ ℓ ⊔ ℓ') ⊔ b)
 RelT T ℓ ℓ' = ∀{A} → Rel A ℓ → Rel (T A) ℓ'
 
 module FunExt
-  {a : Level} -- level of base type
   (A : Set a) -- a type to be used to extend
   (ℓ : Level) -- lower bound of the level of relation
   where
@@ -54,10 +51,10 @@ module FunExt
   funext : Set b → Set (a ⊔ b)
   funext B = A → B
 
-  relT : {b : Level} → RelT (funext {b = b}) ℓ (a ⊔ ℓ)
+  relT : RelT {a = b} funext ℓ (a ⊔ ℓ)
   relT R f g = (x : A) → R (f x) (g x)
 
-  module _ (R : Rel A ℓ) where
+  module _ (B : Set b) (R : Rel B ℓ) where
 
     reflT : Reflexive R → Reflexive (relT R)
     reflT refl a = refl
@@ -68,7 +65,7 @@ module FunExt
     transT : Transitive R → Transitive (relT R)
     transT trans aij ajk a = trans (aij a) (ajk a)
 
-  module _ (R R' : Rel A ℓ) where
+  module _ (B : Set b) (R R' : Rel B ℓ) where
     antisymT : Antisymmetric R R' → Antisymmetric (relT R) (relT R')
     antisymT antisym aij aji a = antisym (aij a) (aji a)
 
@@ -76,43 +73,27 @@ module FunExt
     oreflT orefl aij a = orefl (aij a)
 
     pequivT : IsPartialEquivalence R → IsPartialEquivalence (relT R)
-    pequivT pe = record { sym = symT R sym ; trans = transT R trans} where open IsPartialEquivalence pe
+    pequivT pe = record { sym = symT B R sym ; trans = transT B R trans} where open IsPartialEquivalence pe
 
     equivT : IsEquivalence R → IsEquivalence (relT R)
-    equivT e = record { refl = reflT R refl ; sym = symT R sym ; trans = transT R trans} where open IsEquivalence e
+    equivT e = record { refl = reflT B R refl ; sym = symT B R sym ; trans = transT B R trans} where open IsEquivalence e
 
     preorderT : IsPreorder R R' → IsPreorder (relT R) (relT R')
-    preorderT pre = record { isEquivalence = equivT isEquivalence ; reflexive = oreflT reflexive ; trans = transT R' trans} where open IsPreorder pre
+    preorderT pre = record { isEquivalence = equivT isEquivalence ; reflexive = oreflT reflexive ; trans = transT B R' trans} where open IsPreorder pre
 
     partialorderT : IsPartialOrder R R' → IsPartialOrder  (relT R) (relT R')
     partialorderT po = record { isPreorder = preorderT isPreorder ; antisym = antisymT antisym} where open IsPartialOrder po
 
-  hasOrderT : HasOrder A ℓ → HasOrder (funext A) _
-  hasOrderT record 
-    { E = E
-    ; O = O
-    } = record 
-    { E = relT E
-    ; O = relT O
-    }
 
-  hasPreorderT : HasPreorder A ℓ → HasPreorder (funext A) _
-  hasPreorderT record
-    { hasOrder = hasOrder
-    ; isPreorder = isPreorder
-    } = record 
-    { hasOrder = hasOrderT hasOrder
-    ; isPreorder = preorderT E O isPreorder
-    } where open HasOrder hasOrder
+  module _ (B : Set b) where
+    hasOrderT : HasOrder B ℓ → HasOrder (funext B) _
+    hasOrderT o = record { E = relT E; O = relT O} where open HasOrder o
 
-  hasPartialOrderT : HasPartialOrder A ℓ → HasPartialOrder (funext A) _
-  hasPartialOrderT record
-    { hasOrder = hasOrder
-    ; isPartialOrder = isPartialOrder
-    } = record
-    { hasOrder = hasOrderT hasOrder
-    ; isPartialOrder = partialorderT E O isPartialOrder
-    } where open HasOrder hasOrder
+    hasPreorderT : HasPreorder B ℓ → HasPreorder (funext B) _
+    hasPreorderT o = record { E = relT E; O = relT O; isPreorder = preorderT B E O isPreorder } where open HasPreorder o
+
+    hasPartialOrderT : HasPartialOrder B ℓ → HasPartialOrder (funext B) _
+    hasPartialOrderT o = record { E = relT E; O = relT O; isPartialOrder = partialorderT B E O isPartialOrder} where open HasPartialOrder o
 
 -- monotone function
 record IsMonotone {A : Set a} {B : Set b} (RA : HasOrder A ℓ) (RB : HasOrder B ℓ)
