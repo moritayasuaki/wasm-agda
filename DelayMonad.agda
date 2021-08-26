@@ -1,4 +1,4 @@
-{-# OPTIONS --guardedness --cubical #-}
+{-# OPTIONS --guardedness #-}
 module DelayMonad where
 
 open import Category.Monad
@@ -35,9 +35,3 @@ record Partiality (A : Set) : Set where
   coinductive
   field
     force : Partiality A ⊎ A
-
-open Category.Monad.Indexed.RawIMonad
-monadPartiality : RawMonad Partiality
-Partiality.force (return monadPartiality x) = inj₂ x
-Partiality.force (_>>=_ monadPartiality m f) with m
-... | t = {! t !}

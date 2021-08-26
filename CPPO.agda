@@ -13,7 +13,6 @@ open import Relation.Binary.Morphism.Structures
 open import Relation.Binary.PropositionalEquality using (_≡_ ; inspect ; [_]) renaming (subst₂ to ≡-subst₂ ; cong₂ to ≡-cong₂ ; cong to ≡-cong ; refl to ≡-refl ; subst to ≡-subst ; sym to ≡-sym)
 open import Algebra
 
-
 module _ where
   private
     variable
@@ -22,6 +21,15 @@ module _ where
       Y : Set b
       _≈_ : Rel X ℓ₁
       _≲_ : Rel X ℓ₂
+
+  IsEndoOrderHomomorphism : {X : Set a} → Rel X ℓ₁ → Rel X ℓ₂ → (X → X) → Set (a ⊔ ℓ₁ ⊔ ℓ₂)
+  IsEndoOrderHomomorphism _≈_ _≲_ step = IsOrderHomomorphism _≈_ _≈_ _≲_ _≲_ step
+
+  Bihomomorphic : ∀{a b c ar br cr} → {A : Set a} → {B : Set b} → {C : Set c} → Rel A ar → Rel B br → Rel C cr → (A → B → C) → Set _
+  Bihomomorphic {A = A} {B = B} {C = C} RA RB RC f = (a1 a2 : A) → (b1 b2 : B) → (RA a1 a2) → (RB b1 b2) → (RC (f a1 b1) (f a2 b2))
+
+  IsIncreasing : {X : Set a} → Rel X ℓ₂ → (X → X) → Set (a ⊔ ℓ₂)
+  IsIncreasing {X = X} _≲_ step = (x : X) → x ≲ step x
 
   IsωChain : {X : Set a} → Rel X ℓ₁ → Rel X ℓ₂ → (ℕ → X) → Set (ℓ₁ ⊔ ℓ₂)
   IsωChain _≈_ _≲_ c = IsOrderHomomorphism (_≡_ {A = ℕ}) _≈_ Nat._≤_ _≲_ c
@@ -62,10 +70,10 @@ module _ where
   iter f Nat.zero = id
   iter f (Nat.suc n) = f ∘ iter f n
 
-  iter-mono : (f : X → X) → (IsOrderHomomorphism _≈_ _≈_ _≲_ _≲_ f) →
+  iter-monotone : (f : X → X) → (IsEndoOrderHomomorphism _≈_ _≲_ f) →
     (n : ℕ) → (x y : X) → (x ≲ y) → iter f n x ≲ iter f n y
-  iter-mono f fIsMonotone (Nat.zero) x y p = p
-  iter-mono f fIsMonotone (Nat.suc n) x y p = fIsMonotone .mono (iter-mono f fIsMonotone n x y p) where
+  iter-monotone f f-isMonotone (Nat.zero) x y p = p
+  iter-monotone f f-isMonotone (Nat.suc n) x y p = f-isMonotone .mono (iter-monotone f f-isMonotone n x y p) where
     open IsOrderHomomorphism
   iter-fixed : (f : X → X) → (IsEquivalence _≈_) → (IsRelHomomorphism _≈_ _≈_ f) →
     (n : ℕ) → (x : X) → IsFixedPoint _≈_ f x → iter f n x ≈ x
@@ -75,6 +83,28 @@ module _ where
     open IsRelHomomorphism ≈-is-closed-under-f
     open IsEquivalence ≈-is-equiv
     fⁿx≈x = iter-fixed f ≈-is-equiv ≈-is-closed-under-f n x fx≈x
+
+  iter-bimonotone  : (f : X → X) → (IsEndoOrderHomomorphism _≈_ _≲_ f) → (IsIncreasing _≲_ f) → (IsPreorder _≈_ _≲_) →
+    ((iter f) Preserves₂ Nat._≤_ ⟶ _≲_ ⟶ _≲_)
+  iter-bimonotone f monotone increasing preorder {y = Nat.zero} Nat.z≤n u≲v = u≲v
+  iter-bimonotone f monotone increasing preorder {y = Nat.suc y} {v = v} Nat.z≤n u≲v =
+    let t = iter-bimonotone f monotone increasing preorder {y = y} Nat.z≤n u≲v in
+    let t' = increasing (iter f y v) in IsPreorder.trans preorder t t'
+  iter-bimonotone f monotone increasing preorder (Nat.s≤s n≤m) u≲v =
+    let t = iter-bimonotone f monotone increasing preorder n≤m u≲v in IsOrderHomomorphism.mono monotone t
+
+  iter-bihomomorphic  : (f : X → X) → (IsEndoOrderHomomorphism _≈_ _≲_ f) → (IsIncreasing _≲_ f) → (IsPreorder _≈_ _≲_) → Bihomomorphic Nat._≤_ _≲_ _≲_ (iter f)
+  iter-bihomomorphic f monotone increasing preorder .0 Nat.zero x y Nat.z≤n x≲y = x≲y
+  iter-bihomomorphic f monotone increasing preorder .0 (Nat.suc n) x y Nat.z≤n x≲y =
+    let t = iter-bihomomorphic f monotone increasing preorder 0 n x y Nat.z≤n x≲y in
+    let t' = increasing (iter f n y) in IsPreorder.trans preorder t t' 
+  iter-bihomomorphic f monotone increasing preorder (Nat.suc n) (Nat.suc m) x y (Nat.s≤s n≤m) x≲y =
+    let t = iter-bihomomorphic f monotone increasing preorder n m x y n≤m x≲y in IsOrderHomomorphism.mono monotone t
+
+  module _ {a b c a' b' c' : Level} {A : Set a} {B : Set b} {C : Set c}
+           (RA : Rel A a') (RB : Rel B b') (RC : Rel C c')
+           (tRA : Transitive RA) (tRB : Transitive RB) (tRC : Transitive RC)
+           (f : A → B → C) (f-bi : Bihomomorphic RA RB RC f) where
 
 record ωChainCompletePartialOrder c ℓ₁ ℓ₂ : Set (Level.suc (c ⊔ ℓ₁ ⊔ ℓ₂)) where
   field
@@ -127,7 +157,7 @@ module _ where
   open IsNoetherian
   open IsOrderHomomorphism
   open IsωChainCompletePointedPartialOrder
-  lfp : IsωChainCompletePointedPartialOrder _≈_ _≲_ ⊥ → (f : X → X) → IsOrderHomomorphism _≈_ _≈_ _≲_ _≲_ f → Σ X (IsLeastFixedPoint _≈_ _≲_ f)
+  lfp : IsωChainCompletePointedPartialOrder _≈_ _≲_ ⊥ → (f : X → X) → IsEndoOrderHomomorphism _≈_ _≲_ f → Σ X (IsLeastFixedPoint _≈_ _≲_ f)
   lfp {_≈_ = _≈_} {_≲_ = _≲_} {⊥ = ⊥} isCPPO f fIsMonotone = (p , isLFP) where
     s = flip (iter f) ⊥
     sIsNoetherian : IsNoetherian _≈_ _≲_ s
@@ -144,7 +174,7 @@ module _ where
     isLFP .isFixedPoint =  isCPPO .isEquivalence .IsEquivalence.sym ((sIsNoetherian .stabilize) (sIsNoetherian .height) ≤-refl) where
       open import Data.Nat.Properties
     isLFP .least x fx≈x = fⁿ⊥≲x where
-      fⁿ⊥≲fⁿx = iter-mono f fIsMonotone (sIsNoetherian .height) ⊥ x (isCPPO .minimum x)
+      fⁿ⊥≲fⁿx = iter-monotone f fIsMonotone (sIsNoetherian .height) ⊥ x (isCPPO .minimum x)
       fⁿx≈x = iter-fixed f (isCPPO .isEquivalence) (Eq.isRelHomomorphism fIsMonotone) (sIsNoetherian .height) x fx≈x
       fⁿ⊥≲x = isCPPO .trans  fⁿ⊥≲fⁿx (isCPPO .reflexive fⁿx≈x) 
 
