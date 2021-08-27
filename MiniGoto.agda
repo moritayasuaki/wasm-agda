@@ -1,4 +1,4 @@
-module Goto where
+module MiniGoto where
 
 module Syntax where
   open import Data.Integer using (ℤ)
