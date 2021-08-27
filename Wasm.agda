@@ -34,7 +34,10 @@ record arrow (I : Set) (O : Set) : Set where
     dom : I
     cod : O
 
-
+_<b_ : Nat.ℕ → Nat.ℕ → Bool.Bool
+n <b 0 = Bool.false
+0 <b Nat.suc m = Bool.true
+Nat.suc n <b Nat.suc m = n <b m
 
 module Show where
   open String
@@ -514,9 +517,11 @@ module Interpreter where
     setmem : mem → M ⊤
     setmem new (old , vs') = ok' (new , vs')
 
-    chklimit : ℕ → mem → Bool
-    chklimit i m = let open mem m in isYes (i Nat.<? limit)
-    
+
+
+    chklimit : ℕ → M Bool
+    chklimit i (m , vs) = ok ((i <ᵇ mem.limit m) , m , vs)
+
     reassign : ℕ → ℕ → mem → mem
     reassign i v m = record
       { limit = limit
@@ -532,15 +537,11 @@ module Interpreter where
     write : ℕ → ℕ → M ⊤
     write i v = do
       m ← getmem
-      true ← return (chklimit i m) where
-        false → λ _ → trap'
       setmem (reassign i v m)
 
     read : ℕ → M ℕ
     read i = do
       m ← getmem
-      true ← return (chklimit i m) where
-        false → λ _ → trap'
       return (mem.assign m i)
 
     open Relation.Binary
@@ -558,11 +559,15 @@ module Interpreter where
     einsn : m-insn → M ⊤
     einsn m-load = do
       ea ← popchk nat
+      true ← chklimit ea where
+        false → λ _ → stop trap
       v ← read ea
       push (nat v)
     einsn m-store = do
       v ← popchk nat
       ea ← popchk nat
+      true ← chklimit ea where
+        false → λ _ → stop trap
       write ea v
 
     einsn m-grow = do
@@ -655,7 +660,7 @@ module Example where
   open Unit
   open Show
 
-  ex0 ex1 ex2 ex3 ex4 ex5 ex6 ex7 ex8 ex9 : config
+  ex0 ex1 ex2 ex3 ex4 ex5 ex6 ex7 ex8 ex9 ex10 ex11 : config
   ex0 = (initmem , [] , (nat 1 ∷ nat 2 ∷ []) , (add ∷ []))
   ex1 = (initmem , [] , (bool true ∷ nat 1 ∷ nat 0 ∷ []) , ( not ∷ (if-else (nat ∷ nat ∷ [] ⇒ [ nat ]) [ add ] [ drop ]) ∷ []))
   ex2 = (initmem , [] , [] , (block ([] ⇒ [ nat ]) (const (nat 1) ∷ block ([ nat ] ⇒ [ nat ]) (br 1 ∷ []) ∷ []) ∷ []))
@@ -666,6 +671,8 @@ module Example where
   ex7 = (initmem , [] , bool true ∷ bool true ∷ [] , add ∷ [])
   ex8 = (initmem , [] , nat 1 ∷ [] , block (nat ∷ [] ⇒ bool ∷ []) (const (nat 1) ∷ block (nat ∷ [] ⇒ []) (const (bool true) ∷ br 1 ∷ []) ∷ []) ∷ [])
   ex9 = (initmem , [] , [] , const (nat 10) ∷ grow ∷ drop ∷ const (nat 5) ∷ const (nat 3) ∷ store ∷ [])
+  ex10 = (initmem , [] , [] , const (nat 0) ∷ const (nat 0) ∷ store ∷ [])
+  ex11 = (initmem , [] , [] , const (nat 0) ∷ load ∷ [])
 
   show-result : Eval res (⊤ × config) → String
   show-result (done' m vs) = "(" ++ concat-with-comma (show-mem m ∷ show-vals vs ∷ []) ++ ")"
@@ -677,4 +684,5 @@ module Example where
   show-eval ex = show-config ex ++ " ↦* " ++ show-result (estepn 1024 ex)
 
   run_ : List String
-  run_ = (List.map show-eval (ex0 ∷ ex1 ∷ ex2 ∷ ex3 ∷ ex4 ∷ ex5 ∷ ex6 ∷ ex7 ∷ ex8 ∷ ex9 ∷ []))
+  run_ = (List.map show-eval (ex0 ∷ ex1 ∷ ex2 ∷ ex3 ∷ ex4 ∷ ex5 ∷ ex6 ∷ ex7 ∷ ex8 ∷ ex9 ∷ ex10 ∷ ex11 ∷ []))
+

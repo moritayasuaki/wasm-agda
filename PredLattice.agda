@@ -13,7 +13,7 @@ private
     i j k : Level
     A : Set i
 
-open import Relation.Unary hiding (∅ ; U)
+open import Relation.Unary hiding (∅ ; U) public
 
 record True (j : Level): Set j where
   constructor tt

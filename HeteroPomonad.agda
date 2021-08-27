@@ -11,17 +11,17 @@ private
 record HPomonad (M : Set i → Set j) : Set (suc (i ⊔ j)) where
   field
     hMonad : HMonad M
-    hasPointwiseOrder : HasPointwiseOrder M j
+    hasPointwisePreorder : HasPointwisePreorder M j
   open HMonad hMonad
 
   F : Set i → Set i → Set (i ⊔ j)
   F A B = A → M B
 
-  hasPairwiseOrder : HasPairwiseOrder F (i ⊔ j)
-  hasPairwiseOrder A B = (FunExt.hasOrderT A j (M B)) (hasPointwiseOrder B)
+  hasPairwisePrerder : HasPairwisePreorder F (i ⊔ j)
+  hasPairwisePrerder A B = (FunExt.hasPreorderT A j (M B)) (hasPointwisePreorder B)
 
   field
-    >=>-isBimonotone : {A B C : Set i} → IsBimonotone (hasPairwiseOrder A B) (hasPairwiseOrder B C) (hasPairwiseOrder A C) _>=>_
+    >=>-isBimonotone : {A B C : Set i} → IsBimonotone (hasPairwisePrerder A B) (hasPairwisePrerder B C) (hasPairwisePrerder A C) _>=>_
 
 HPomonadT : ((Set i → Set j) → (Set k → Set l)) → Set (suc (i ⊔ j ⊔ k ⊔ l))
 HPomonadT T = ∀{M} → HPomonad M → HPomonad (T M)

@@ -11,7 +11,7 @@ open import Data.Sum
 open import Data.Unit
 open import Category.Functor using (RawFunctor)
 open import Function
-open import HMonad
+open import HeteroMonad
 open import PredLattice
 
 private
