@@ -396,7 +396,7 @@ module Semantics (_≟_ : Dec-≡ Var)  where
     ⟦ .[] ⟧ [] cfg = inj₁ cfg
     -- Sequential composition ⟦ i ∷ is ⟧ provides only minimum footprint for ⟦ i ⟧i, i.e. it provides (VecM.take a0 ostk) for `i` and keeps (VecM.drop a0 ostk) for subsequent instructions `is` 
     -- This can be done because we know the minimum footprint `a0` for `i` by `hasMinTypeI` predicate.
-    -- If the evaluation of `i` normally goes in current frame, then we take back `VecM.drop a0 ostk` on `ostk'` which is production of `i`.
+    -- If the evaluation of `i` normally goes in current frame, then we take back `VecM.drop a0 ostk` under `ostk'` which is production of `i`.
     -- If the evaluation of `i` jump outside, then `VecM.drop a0 ostk` will be lost.
     -- Sequencial composition only give minimum footprint for `br l` instruction too.
     -- Here, `es !! l` corresponds to the minumum footprint for `br l`.
