@@ -400,7 +400,7 @@ module Semantics (_≟_ : Dec-≡ Var)  where
     -- If the evaluation of `i` jump outside, then `VecM.drop a0 ostk` will be lost.
     -- Sequencial composition only give minimum footprint for `br l` instruction too.
     -- Here, `es !! l` corresponds to the minumum footprint for `br l`.
-    -- So `br` instruction itself does not need to do something like split local stack or discard stack elements.
+    -- So `br` instruction itself does not need to do something like spliting local stack or discarding stack elements.
     ⟦ i ∷ is ⟧ (((a0 , r0) , i-hasMinTypeI , (d , .d) , refl , refl , refl) ∷ tis) (sto , ostk) with ⟦ i ⟧i i-hasMinTypeI (sto , VecM.take a0 ostk)
     ... | inj₁ (sto' , ostk') = ⟦ is ⟧ tis (sto' , ostk' VecM.++ (VecM.drop a0 ostk))
     ... | inj₂ lbls = inj₂ lbls
