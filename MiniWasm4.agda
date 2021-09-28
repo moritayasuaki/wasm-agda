@@ -7,7 +7,7 @@ open import Data.Nat as Nat
 open import Data.Bool as BoolM hiding (not ; _≤_ ; _≤?_)
 open import Data.Unit hiding (_≤_ ;  _≤?_)
 open import Data.Product
-open import Data.Fin hiding (_+_ ; _≤_ ; _≤?_)
+open import Data.Fin as FinM hiding (_+_ ; _≤_ ; _≤?_)
 open import Data.Vec as VecM hiding (_++_ ; length ; _>>=_)
 open import Data.List as ListM hiding (and)
 open import Relation.Binary.PropositionalEquality
@@ -16,9 +16,13 @@ open import Relation.Nullary.Decidable
 open import Relation.Nullary
 open import Relation.Nullary.Product
 open import Data.Empty
+open import Data.Sum
 
 Dec-≡ : Set → Set
 Dec-≡ A = Decidable (_≡_ {A = A})
+
+∃!⇒∃ : ∀{a ℓ} {A : Set a} {P : A → Set ℓ} → ∃! _≡_ P → ∃ P
+∃!⇒∃ (x , Px , _) = x , Px
 
 data Wildcard (A : Set) : Set where
   exactly : A → Wildcard A
@@ -46,17 +50,15 @@ module Syntax where
     nop : Insn n
     br : (l : Fin n) → Insn n
     brif : (l : Fin n) → Insn n
-    block : (a r : ℕ) → (is : List (Insn (suc n))) → Insn n
-    loop : (a r : ℕ) → (is : List (Insn (suc n))) → Insn n
+    block : (t : ℕ × ℕ) → (is : List (Insn (suc n))) → Insn n
+    loop : (t : ℕ × ℕ) → (is : List (Insn (suc n))) → Insn n
 
   Code : ℕ → Set
   Code n = List (Insn n)
 
 module Typing where
   open Syntax
-  open import Relation.Binary.PropositionalEquality
   open import Data.Nat.Properties
-
 
   private
     variable
@@ -64,155 +66,252 @@ module Typing where
       l : ℕ -- block height
       v : Var -- varibale name
       z : ℤ -- integer value
-      a r a' r' d m : ℕ -- operand type argument and result
+      a r a' r' d m r0 : ℕ -- operand type argument and result
       -- i : Insn -- an instruction
       -- is : Code -- sequence of instructions
 
+  m≤n⇒∃!d[m+d≡n] : ∀{m n} → m ≤ n → ∃! _≡_ λ d → m + d ≡ n
+  m≤n⇒∃!d[m+d≡n] {n = n} z≤n = (n , refl , sym)
+  m≤n⇒∃!d[m+d≡n] {n = suc n} (s≤s m≤n) = let (d , m+d≡n , ∀d'[m+d'≡n⇒d'≡d]) = m≤n⇒∃!d[m+d≡n] m≤n in (d , cong suc m+d≡n , λ m+d'≡n → ∀d'[m+d'≡n⇒d'≡d] (suc-injective m+d'≡n)) 
+
+
+  m≤n⇒∃d[m+d≡n] : ∀{m n} → m ≤ n → ∃ λ d → m + d ≡ n
+  m≤n⇒∃d[m+d≡n] m≤n = ∃!⇒∃ (m≤n⇒∃!d[m+d≡n] m≤n)
+
+  ∃d[m+d≡n]⇒m≤n : ∀{m n} → (∃ λ d → m + d ≡ n) → m ≤ n
+  ∃d[m+d≡n]⇒m≤n {m} (d , m+d≡n@refl) = m≤m+n m d
+
+  ∃!d[m+d≡n]? : Decidable λ m n → ∃! _≡_ λ d → m + d ≡ n
+  ∃!d[m+d≡n]? m n with m ≤? n
+  ... | yes m≤n = yes (m≤n⇒∃!d[m+d≡n] m≤n)
+  ... | no m≰n = no λ (d , m+d≡n , _) → m≰n (∃d[m+d≡n]⇒m≤n (d ,  m+d≡n))
+
+  _-?_ : Decidable λ n m → ∃! _≡_ λ d → m + d ≡ n
+  m -? n = ∃!d[m+d≡n]? n m
+
+  m+n≡o⇒m≤o : ∀ {m n o : ℕ} → m + n ≡ o → m ≤ o
+  m+n≡o⇒m≤o m+n≡o = m+n≤o⇒m≤o _ (≤-reflexive m+n≡o)
+
+  m+d≡n⇒m∸n≡d : m + d ≡ n → n ∸ m ≡ d
+  m+d≡n⇒m∸n≡d {m} refl = m+n∸m≡n m _
+
   _subtypeOf_ : ℕ × ℕ → ℕ × ℕ → Set
-  (a , r) subtypeOf (a' , r') = ∃ λ ((da , dr) : ℕ × ℕ) → da ≡ dr × a + da ≡ a' × r + dr ≡ r'
+  (a , r) subtypeOf (a' , r') = ∃ λ d → a + d ≡ a' × r + d ≡ r'
 
-  _subtypeOfW_ : ℕ × Wildcard ℕ → ℕ × ℕ → Set
-  (a , exactly r) subtypeOfW (a' , r') = (a , r) subtypeOf (a' , r')
-  (a , atleast r0) subtypeOfW (a' , r') = ∃ λ d → (a , r0 + d) subtypeOf (a' , r')
+  _subtypeOf-≡_ : ℕ × ℕ → ℕ × ℕ → Set
+  (a , r) subtypeOf-≡ (a' , r') = ∃ λ a'-a → a + a'-a ≡ a' × ∃ λ r'-r → r + r'-r ≡ r' × a'-a ≡ r'-r
 
-  _subtypeOfWM_ : Maybe (ℕ × Wildcard ℕ) → ℕ × ℕ → Set
-  nothing subtypeOfWM _ = ⊥
-  just q subtypeOfWM t = q subtypeOfW t
+  _subtypeOf-∸_ : ℕ × ℕ → ℕ × ℕ → Set
+  (a , r) subtypeOf-∸ (a' , r') = a ≤ a' × r ≤ r' × a' ∸ a ≡ r' ∸ r
+
+  sub-≡⇒sub-∸ : (a , r) subtypeOf-≡ (a' , r') → (a , r) subtypeOf-∸ (a' ,  r')
+  sub-≡⇒sub-∸ {a = a} {r = r} (a'-a , a+a'-a≡a' , r'-r , r+r'-r≡r' , a'-a≡r'-r) = let
+    a'-a≡a'∸a = m+d≡n⇒m∸n≡d {m = a} a+a'-a≡a'
+    r'-r≡r'∸r = m+d≡n⇒m∸n≡d {m = r} r+r'-r≡r'
+    in m+n≡o⇒m≤o a+a'-a≡a' , m+n≡o⇒m≤o r+r'-r≡r' , subst₂ _≡_ (sym a'-a≡a'∸a) (sym r'-r≡r'∸r) a'-a≡r'-r
+
+  sub-∸⇒sub-≡ : (a , r) subtypeOf-∸ (a' , r') → (a , r) subtypeOf-≡ (a' , r')
+  sub-∸⇒sub-≡ {a} {r} {a'} {r'} (a≤a' , r≤r' , a'∸a≡r'∸r) = (a' ∸ a , m+[n∸m]≡n a≤a' , r' ∸ r , m+[n∸m]≡n r≤r' , a'∸a≡r'∸r)
+
+  sub-≡⇒sub : (a , r) subtypeOf-≡ (a' , r') → (a , r) subtypeOf (a' , r')
+  sub-≡⇒sub (d , a+d≡a' , .d , r+d≡r' , refl) = d , a+d≡a' , r+d≡r'
+
+  sub⇒sub-≡ : (a , r) subtypeOf (a' , r') → (a , r) subtypeOf-≡ (a' , r')
+  sub⇒sub-≡ (d , a+d≡a' , r+d≡r') = d , a+d≡a' , d , r+d≡r' , refl
+
+  sub⇒sub-∸ : (a , r) subtypeOf (a' , r') → (a , r) subtypeOf-∸ (a' , r')
+  sub⇒sub-∸ = sub-≡⇒sub-∸ ∘ sub⇒sub-≡ 
+  sub-∸⇒sub : (a , r) subtypeOf-∸ (a' , r') → (a , r) subtypeOf (a' , r')
+  sub-∸⇒sub = sub-≡⇒sub ∘ sub-∸⇒sub-≡ 
+
+  r-uniq-∸ : a ≤ a' → a' ∸ a ≤ r' → ∃! _≡_ λ r → (a , r) subtypeOf-∸ (a' , r')
+  r-uniq-∸ {a} {a'} {r'} a≤a' a'∸a≤r' =
+    r' ∸ (a' ∸ a) , (a≤a' , m∸n≤m r' (a' ∸ a) , sym (m∸[m∸n]≡n a'∸a≤r')) , λ {r} (_ , r≤r' , a'∸a≡r'∸r) →  trans (cong (r' ∸_) a'∸a≡r'∸r) (m∸[m∸n]≡n r≤r') 
+
+  r-uniq : a ≤ a' → a' ∸ a ≤ r' → ∃! _≡_ λ r → (a , r) subtypeOf (a' , r')
+  r-uniq a≤a' a'∸a≤r' with r-uniq-∸ a≤a' a'∸a≤r'
+  ... | r , sub-∸[r] , sub-∸[x]⇒x≡r = r , sub-∸⇒sub sub-∸[r] , λ sub[x] → sub-∸[x]⇒x≡r (sub⇒sub-∸ sub[x])
+
+  _subtypeOf-∸?_ : Decidable _subtypeOf-∸_
+  (a , r) subtypeOf-∸? (a' , r') = a ≤? a' ×-dec r ≤? r' ×-dec a' ∸ a Nat.≟ r' ∸ r
+
+  _subtypeOf-≡?_ : Decidable _subtypeOf-≡_
+  t subtypeOf-≡? t' with t subtypeOf-∸? t'
+  ... | yes sub' = yes (sub-∸⇒sub-≡ sub')
+  ... | no ¬sub' = no (λ sub-≡ → ¬sub' (sub-≡⇒sub-∸ sub-≡))
 
   _subtypeOf?_ : Decidable _subtypeOf_
-  (a , r) subtypeOf? (a' , r') with a ≤? a' | r ≤? r'
-  ... | no a≰a' | _ = no λ (_ , _ , a+d≡a' , _) → a≰a' (m+n≤o⇒m≤o _ (≤-reflexive a+d≡a')) 
-  ... | _ | no r≰r' = no λ (_ , _ , _ , r+d≡r') → r≰r' (m+n≤o⇒m≤o _ (≤-reflexive r+d≡r'))
-  ... | yes a≤a' | yes r≤r' with r' ∸ r Nat.≟ a' ∸ a
-  ... | no np =  no λ (da , dr , a+d≡a' , r+d≡r') → {! !}  
-  ... | yes p = {! !}
+  t subtypeOf? t' with t subtypeOf-≡? t'
+  ... | yes sub-≡ = yes (sub-≡⇒sub sub-≡)
+  ... | no ¬sub-≡ = no (λ sub-0 → ¬sub-≡ (sub⇒sub-≡ sub-0))
+
+  _subtypeOf≤-+_ : ℕ × ℕ → ℕ × ℕ → Set
+  (a , r0) subtypeOf≤-+ (a' , r') = ∃ λ d → (a , r0 + d) subtypeOf (a' , r')
+  
+  _subtypeOf≤_ : ℕ × ℕ → ℕ × ℕ → Set
+  (a , r0) subtypeOf≤ (a' , r') = ∃ λ r → r0 ≤ r × (a , r) subtypeOf (a' , r')
+
+  _subtypeOf≤?_ : Decidable _subtypeOf≤_
+  (a , r0) subtypeOf≤? (a' , r') with a ≤? a' | a' ∸ a ≤? r'
+  ... | no a≰a' | _ = no λ (r , r0≤r , sub) → case sub⇒sub-∸ sub of λ (a≤a' , _) → a≰a' a≤a'
+  ... | _ | no a'∸a≰r' = no λ (r , r0≤r , sub) → case sub⇒sub-∸ sub of λ (a≤a' , r≤r' , a'∸a≡r'∸r) → a'∸a≰r' (≤-trans (≤-reflexive a'∸a≡r'∸r) (m∸n≤m r' r))
+  ... | yes a≤a' | yes a'∸a≤r' with r-uniq a≤a' a'∸a≤r'
+  ... | (r , sub-r , ∀sub-x⇒x≡r) with r0 ≤? r
+  ... | no r0≰r = no λ (x , r0≤x , sub-x) → r0≰r (≤-trans r0≤x (≤-reflexive (sym (∀sub-x⇒x≡r sub-x))))
+  ... | yes r0≤r = yes (r , r0≤r , sub-r)
+
+  sub≤-+⇒sub≤ : (a , r0) subtypeOf≤-+ (a' , r') → (a , r0) subtypeOf≤ (a' , r')
+  sub≤-+⇒sub≤ {r0 = r0} (rd , sub) = r0 + rd , m≤m+n r0 rd , sub
+
+  sub≤⇒sub≤-+ : (a , r0) subtypeOf≤ (a' , r') → (a , r0) subtypeOf≤-+ (a' , r')
+  sub≤⇒sub≤-+ {r0 = r0} (r , r0≤r , d , a+d≡a' , r+d≡r') = (r ∸ r0 , d , a+d≡a' , trans (cong (_+ d) ((m+[n∸m]≡n r0≤r))) r+d≡r')
+
+  _subtypeOfW_ : ℕ × Wildcard ℕ → ℕ × Wildcard ℕ → Set
+  (a , exactly r) subtypeOfW (a' , exactly r') = (a , r) subtypeOf (a' , r')
+  (a , exactly r) subtypeOfW (a' , atleast r0') = ⊥
+  (a , atleast r0) subtypeOfW (a' , exactly r') = (a , r0) subtypeOf≤ (a' , r')
+  (a , atleast r0) subtypeOfW (a' , atleast r0') = (a , r0) subtypeOf≤ (a' , r0')
 
   _subtypeOfW?_ : Decidable _subtypeOfW_
-  (a , exactly r) subtypeOfW? (a' , r') = (a , r) subtypeOf? (a' , r')
+  (a , exactly r) subtypeOfW? (a' , exactly r') = (a , r) subtypeOf? (a' , r')
+  (a , exactly r) subtypeOfW? (a' , atleast r0') = no λ()
+  (a , atleast r0) subtypeOfW? (a' , exactly r') = (a , r0) subtypeOf≤? (a' , r')
+  (a , atleast r0) subtypeOfW? (a' , atleast r0') = (a , r0) subtypeOf≤? (a' , r0')
 
-  {-
-  (a , atleast r0) subtypeOfW? (a' , r') with a ≤? a' 
-  ... | no a≰a' = no λ (d , sub) → a≰a' (sub→a≤a' sub)
-  ... | yes a≤a' with r0 + a' ≤? a + r'
-  ... | no r0+a'≰a+r' = no λ (d , sub) → let
-    open ≤-Reasoning
-    (_ , a+r'≡r+a') = sub→≤×cmp sub
-    r0+a'≤a+r' = begin
-      r0 + a' ≤⟨ +-monoˡ-≤ a' (m≤m+n r0 d) ⟩ 
-      r0 + d + a' ≡⟨ sym a+r'≡r+a' ⟩
-      a + r' ∎
-    in r0+a'≰a+r' r0+a'≤a+r'
-  ... | yes r0+a'≤a+r' = let
-    open ≤-Reasoning
-    d = a' ∸ a
-    r = a + r' ∸ a'
-    d' = r ∸ r0
-    a'≤a+r' = begin
-      a' ≤⟨ m≤n+m a' r0 ⟩
-      r0 + a' ≤⟨ r0+a'≤a+r' ⟩
-      a + r' ∎
-    {-
-    d≤r' = begin
-      d  ≤⟨  ∸-monoˡ-≤ a a'≤a+r' ⟩
-      a + r' ∸ a ≡⟨ m+n∸m≡n a r' ⟩
-      r' ∎
-    -}
-    r0≤r = begin
-      r0 ≡⟨ sym (+-identityʳ r0) ⟩
-      r0 + 0 ≡⟨ cong (r0 +_) (sym (n∸n≡0 a')) ⟩
-      r0 + (a' ∸ a') ≡⟨ sym (+-∸-assoc r0 (≤-refl {a'})) ⟩
-      r0 + a' ∸ a' ≤⟨ ∸-monoˡ-≤ a' r0+a'≤a+r' ⟩
-      r ∎
-    r+a'≡a+r' = begin-equality
-      r + a' ≡⟨ m∸n+n≡m {m = a + r'} {n = a'}  a'≤a+r' ⟩
-      a + r' ∎
-    in yes (d' ,  d , {!!} , {!!})
-    -}
+  _subtypeOfWM_ : Maybe (ℕ × Wildcard ℕ) → Maybe (ℕ × Wildcard ℕ) → Set
+  _ subtypeOfWM nothing = ⊤
+  just t subtypeOfWM just t' = t subtypeOfW t'
+  _ subtypeOfWM _ = ⊥
 
   _subtypeOfWM?_ : Decidable _subtypeOfWM_
-  nothing subtypeOfWM? t' = no λ()
-  just t subtypeOfWM? t' = t subtypeOfW? t' 
+  _ subtypeOfWM? nothing = yes tt
+  nothing subtypeOfWM? just _ = no id
+  just t subtypeOfWM? just t' = t subtypeOfW? t' 
 
-  _supertypeOfE_ : List ℕ × ℕ × ℕ → List ℕ × ℕ × ℕ  → Set
-  (es , t) supertypeOfE (es' , t') =  ∃ λ de → es ++ de ≡ es' × t' subtypeOf t
+  subPo : IsPartialOrder _≡_ _subtypeOf_
+  subPo = record
+    { isPreorder = record
+      { isEquivalence = isEquivalence
+      ; reflexive = λ { refl →  0 , +-identityʳ _ , +-identityʳ _}
+      ; trans = λ { (d , refl , refl) (d' , refl , refl) →  d + d' , sym (+-assoc _ d d') , sym (+-assoc _ d d')}
+      }
+    ; antisym = λ {i} {j} → λ { (d , eqa , eqr) (d' , eqa' , eqr') → let
+        open ≡-Reasoning
+        i₁+[d+d']≡i₁ = begin proj₁ i + (d + d') ≡⟨ sym (+-assoc _ d d') ⟩
+          proj₁ i + d + d' ≡⟨ cong (_+ d') eqa ⟩
+          proj₁ j + d' ≡⟨ eqa' ⟩
+          proj₁ i ∎
+        i₁+[d+d']≡i₁+0 = begin proj₁ i + (d + d') ≡⟨ i₁+[d+d']≡i₁ ⟩
+          proj₁ i ≡⟨ sym (+-identityʳ (proj₁ i)) ⟩
+          proj₁ i + 0 ∎
+        d+d'≡0 = +-cancelˡ-≡ (proj₁ i) i₁+[d+d']≡i₁+0
+        d≡0 = m+n≡0⇒m≡0 d d+d'≡0
+        i₁≡j₁ = begin proj₁ i ≡⟨ sym (+-identityʳ (proj₁ i)) ⟩
+          proj₁ i + 0 ≡⟨ cong (proj₁ i +_) (sym d≡0) ⟩
+          proj₁ i + d ≡⟨ eqa ⟩
+          proj₁ j ∎
+        i₂≡j₂ = begin proj₂ i ≡⟨ sym (+-identityʳ (proj₂ i)) ⟩
+          proj₂ i + 0 ≡⟨ cong (proj₂ i +_) (sym d≡0) ⟩
+          proj₂ i + d ≡⟨ eqr ⟩
+          proj₂ j ∎
+        in cong₂ _,_ i₁≡j₁ i₂≡j₂
+      }
+    }
 
-  hasTypeC : {n : ℕ} → (es : Vec ℕ n) → Code n → ℕ × ℕ → Set
-  hasTypeI : {n : ℕ} → (es : Vec ℕ n) → Insn n → ℕ × ℕ → Set
-
-  hasTypeC es [] (a , r) = a ≡ r
-  hasTypeC es (i ∷ is) (a , r) = ∃ λ m → hasTypeI es i (a , m) × hasTypeC es is (m , r)
-
-  hasTypeI es (const x) (a , suc r) = a ≡ r
-  hasTypeI es (load x) (a , suc r) = a ≡ r
-  hasTypeI es (store x) (suc a , r) = a ≡ r
-  hasTypeI es add (suc (suc a) , suc r) = a ≡ r
-  hasTypeI es mul (suc (suc a) , suc r) = a ≡ r
-  hasTypeI es and (suc (suc a) , suc r) = a ≡ r 
-  hasTypeI es not (suc a , suc r) = a ≡ r
-  hasTypeI es nop (a , r) =  a ≡ r
-  hasTypeI es (br l) (a , r) = ∃ λ d → VecM.lookup es l + d ≡ a
-  hasTypeI es (brif l) (suc a , r) = (a ≡ r) × ∃ λ d → (VecM.lookup es l + d ≡ a)
-  hasTypeI es (block a' r' is) (a , r) = hasTypeC (r' ∷ es) is (a' , r') × (a' , r') subtypeOf (a , r)
-  hasTypeI es (loop a' r' is) (a , r) = hasTypeC (a' ∷ es) is (a' , r') × (a' , r') subtypeOf (a , r)
-  hasTypeI es _ _ = ⊥
-
-  hasTypeCW : {n : ℕ} → (es : Vec ℕ n) → Code n → ℕ × Wildcard ℕ → Set
-  hasTypeCW es is (a , exactly r) = hasTypeC es is (a , r)
-  hasTypeCW es is (a , atleast r0) = (r : ℕ) → r0 ≤ r → hasTypeC es is (a , r)
-
-  data _⊢_hasTypeC_ (es : Vec ℕ n) : Code n → ℕ × ℕ → Set
-  data _⊢_hasMinTypeI_ (es : Vec ℕ n) : Insn n → ℕ × ℕ → Set where
-    tconst : es ⊢ const z hasMinTypeI (0 , 1)
-    tload  : es ⊢ load v hasMinTypeI (0 , 1)
-    tstore : es ⊢ store v hasMinTypeI (1 , 0)
-    tnop   : es ⊢ nop hasMinTypeI (0 , 0)
-    tnot   : es ⊢ not hasMinTypeI (1 , 1)
-    tand   : es ⊢ and hasMinTypeI (2 , 1)
-    tmul   : es ⊢ mul hasMinTypeI (2 , 1)
-    tadd   : es ⊢ add hasMinTypeI (2 , 1)
-    tbr    : ∀{l : Fin n} → es ⊢ br l hasMinTypeI (VecM.lookup es l , r)
-    tbrif  : ∀{l : Fin n} → es ⊢ brif l hasMinTypeI ((suc (VecM.lookup es l)) , VecM.lookup es l)
-    tblock :
-      {is : Code (suc n)} →
-      (r ∷ es) ⊢ is hasTypeC (a , r) →
-      es ⊢ block a r is hasMinTypeI ( a , r)
-    tloop  :
-      {is : Code (suc n)} →
-      (a ∷ es) ⊢ is hasTypeC (a , r) →
-      es ⊢ loop a r is hasMinTypeI (a , r)
+  _⊢_hasTypeC_ : (es : Vec ℕ n) → Code n → ℕ × ℕ → Set
 
   _⊢_hasTypeI_ : (es : Vec ℕ n) → Insn n → ℕ × ℕ → Set
-  es ⊢ i hasTypeI t = ∃ λ t0 → (es ⊢ i hasMinTypeI t0) × (t0 subtypeOf t)
+  es ⊢ const z hasTypeI (a , suc r) = a ≡ r
+  es ⊢ load v hasTypeI (a , suc r) = a ≡ r
+  es ⊢ store v hasTypeI (suc a , r) = a ≡ r
+  es ⊢ nop hasTypeI  (a , r) = a ≡ r
+  es ⊢ not hasTypeI (suc a , suc r) = a ≡ r
+  es ⊢ and hasTypeI (suc (suc a) , suc r) = a ≡ r
+  es ⊢ mul hasTypeI (suc (suc a) , suc r) = a ≡ r
+  es ⊢ add hasTypeI (suc (suc a) , suc r) = a ≡ r
+  es ⊢ br l hasTypeI (a , r) = ∃ λ d → VecM.lookup es l + d ≡ a
+  es ⊢ brif l hasTypeI (suc a , r) = a ≡ r × ∃ λ d → VecM.lookup es l + d ≡ a
+  es ⊢ block (a' , r') is hasTypeI (a , r) = (a' , r') subtypeOf (a , r) × (r' ∷ es) ⊢ is hasTypeC (a' , r')
+  es ⊢ loop (a' , r') is hasTypeI (a , r) = (a' , r') subtypeOf (a , r) × (a' ∷ es) ⊢ is hasTypeC (a' , r')
+  es ⊢ i hasTypeI t = ⊥
 
-  data _⊢_hasTypeC_ {n} es where
-    [] : es ⊢ [] hasTypeC (r , r)
-    _∷_ : {i : Insn n} → {is : Code n} → es ⊢ i hasTypeI (a , m) → es ⊢ is hasTypeC (m , r) → es ⊢ (i ∷ is) hasTypeC (a , r)
+
+  es ⊢ [] hasTypeC (a , r) = a ≡ r
+  es ⊢ (i ∷ is) hasTypeC (a , r) = ∃ λ m → es ⊢ i hasTypeI (a , m) × es ⊢ is hasTypeC (m , r)
 
   _⊢_hasTypeCW_ : (es : Vec ℕ n) → Code n → ℕ × Wildcard ℕ → Set
   es ⊢ is hasTypeCW (a , exactly r) = es ⊢ is hasTypeC (a , r)
   es ⊢ is hasTypeCW (a , atleast r0) = ∃ λ d → es ⊢ is hasTypeC (a , r0 + d)
 
+  _⊢_hasMinTypeI_ : (es : Vec ℕ n) → Insn n → ℕ × ℕ → Set
+  es ⊢ const z hasMinTypeI (0 , 1) = ⊤
+  es ⊢ load v hasMinTypeI (0 , 1) = ⊤
+  es ⊢ store v hasMinTypeI (1 , 0) = ⊤
+  es ⊢ nop hasMinTypeI (0 , 0) = ⊤
+  es ⊢ not hasMinTypeI (1 , 1) = ⊤
+  es ⊢ and hasMinTypeI (2 , 1) = ⊤
+  es ⊢ mul hasMinTypeI (2 , 1) = ⊤
+  es ⊢ add hasMinTypeI (2 , 1) = ⊤
+  es ⊢ br l hasMinTypeI (a , r) = a ≡ VecM.lookup es l
+  es ⊢ brif l hasMinTypeI (a , r) = a ≡ suc (VecM.lookup es l) × r ≡ VecM.lookup es l
+  es ⊢ block (a , r) is hasMinTypeI (a' , r') = a ≡ a' × r ≡ r' × (r ∷ es) ⊢ is hasTypeC (a , r)
+  es ⊢ loop (a , r) is hasMinTypeI (a' , r') = a ≡ a' × r ≡ r' × (a ∷ es) ⊢ is hasTypeC (a , r)
+  es ⊢ i hasMinTypeI t = ⊥
+
+  _⊢_hasTypeIMin_ : (es : Vec ℕ n) → Insn n → ℕ × ℕ → Set
+  es ⊢ i hasTypeIMin t = ∃ λ t0 → (es ⊢ i hasMinTypeI t0) × (t0 subtypeOf t)
+
+  hasTypeIMin⇒hasTypeI : {es : Vec ℕ n} {i : Insn n} {a : ℕ} {r : ℕ} → es ⊢ i hasTypeIMin (a , r) → es ⊢ i hasTypeI (a , r)
+  hasTypeIMin⇒hasTypeI {i = const z} ((0 , 1) , min , _ , refl , refl) = refl
+  hasTypeIMin⇒hasTypeI {i = load x} ((0 , 1) , min , _ , refl , refl) = refl
+  hasTypeIMin⇒hasTypeI {i = store x} ((1 , 0) , min , _ , refl , refl) = refl
+  hasTypeIMin⇒hasTypeI {i = add} ((2 , 1) , min , _ , refl , refl) = refl
+  hasTypeIMin⇒hasTypeI {i = mul} ((2 , 1) , min , _ , refl , refl) = refl
+  hasTypeIMin⇒hasTypeI {i = and} ((2 , 1) , min , _ , refl , refl) = refl
+  hasTypeIMin⇒hasTypeI {i = not} ((1 , 1) , min , _ , refl , refl) = refl
+  hasTypeIMin⇒hasTypeI {i = nop} ((0 , 0) , min , _ , refl , refl) = refl
+  hasTypeIMin⇒hasTypeI {es = es} {i = br l} ((.(VecM.lookup es l) , r) , refl , d , refl , refl) = d , refl
+  hasTypeIMin⇒hasTypeI {es = es} {i = brif l} ((.(suc (VecM.lookup es l)) , .(VecM.lookup es l)) , (refl , refl) , d , refl , refl) = refl , d , refl 
+  hasTypeIMin⇒hasTypeI {i = block (a' , r') is} ((.a' , .r') , (refl , refl , hasTypeC) , d , refl , refl) = (d , refl , refl) , hasTypeC
+  hasTypeIMin⇒hasTypeI {i = loop (a' , r') is} ((.a' , .r') , (refl , refl , hasTypeC) , d , refl , refl) = (d , refl , refl) , hasTypeC
+  -- converse does not hold for br
+
 module TypeInference where
   open Syntax
   open Typing
-  open import Data.Maybe as MaybeM
-  open import Data.Fin as FinM hiding (_+_ ; suc ; _≤?_)
   open import Data.Nat.Properties
 
-  _!!_ : List ℕ → ℕ → Maybe ℕ
-  [] !! _  = nothing
-  (x ∷ xs) !! zero = just x
-  (_ ∷ xs) !! (suc n) = xs !! n
 
-  guard : {P : Set} → Dec P → Maybe ⊤
-  guard (yes _) = just _
-  guard (no _) = nothing
+  compM : ℕ × Wildcard ℕ → ℕ × Wildcard ℕ → Maybe (ℕ × Wildcard ℕ)
+  compM (a , exactly r) (a' , exactly r') with a' ≤? r | r ≤? a'
+  ... | no ¬a'r | no ¬ra'  = ⊥-elim (¬a'r (≰⇒≥ ¬ra'))
+  ... | yes _ | _ = just (a , exactly (r' + (r ∸ a')))
+  ... | _ | yes _ = just (a + (a' ∸ r) , exactly r')
+  compM (a , exactly r) (a' , atleast r0') with a' ≤? r | r ≤? a'
+  ... | no ¬a'r | no ¬ra'  = ⊥-elim (¬a'r (≰⇒≥ ¬ra'))
+  ... | yes _ | _ = just (a , atleast (r0' + (r ∸ a')))
+  ... | _ | yes _ = just (a + (a' ∸ r) , atleast r0')
+  compM (a , atleast r0) (a' , exactly r') with a' ≤? r0 | r0 ≤? a'
+  ... | no ¬a'r | no ¬ra'  = ⊥-elim (¬a'r (≰⇒≥ ¬ra'))
+  ... | yes _ | _ = just (a , atleast (r' + (r0 ∸ a')))
+  ... | _ | yes _ = just (a , atleast r')
+  compM (a , atleast r0) (a' , atleast r0') with a' ≤? r0 | r0 ≤? a'
+  ... | no ¬a'r | no ¬ra'  = ⊥-elim (¬a'r (≰⇒≥ ¬ra'))
+  ... | yes _ | _ = just (a , atleast (r0' + (r0 ∸ a')))
+  ... | _ | yes _ = just (a , atleast r0')
 
-  comp : ℕ × Wildcard ℕ → ℕ × Wildcard ℕ → ℕ × Wildcard ℕ
-  comp (a , exactly r) (a' , exactly r') = (a + (a' ∸ r) , exactly ((r ∸ a') + r'))
-  comp (a , exactly r) (a' , atleast r') = (a + (a' ∸ r) , atleast ((r ∸ a') + r'))
-  comp (a , atleast r) (a' , exactly r') = (a , atleast (r' + (r ∸ a')))
-  comp (a , atleast r) (a' , atleast r') = (a , atleast (r' + (r ∸ a')))
+  liftW : ℕ × ℕ → ℕ × Wildcard ℕ
+  liftW (a , r) = (a , exactly r)
+
+  liftM : ℕ × Wildcard ℕ → Maybe (ℕ × Wildcard ℕ)
+  liftM t = just t
+
+  liftWM = liftM ∘ liftW
+
+  castW : ℕ × Wildcard ℕ → ℕ × Wildcard ℕ → Maybe (ℕ × Wildcard ℕ)
+  castW t t' = do
+    _ ← decToMaybe (t subtypeOfW? t')
+    just t'
 
   inferI : Vec ℕ n → Insn n → Maybe (ℕ × Wildcard ℕ)
   inferC : Vec ℕ n → Code n → Maybe (ℕ × Wildcard ℕ)
@@ -231,26 +330,25 @@ module TypeInference where
   inferI es (brif l) = let
     e = VecM.lookup es l
     in just (suc e , exactly e)
-  inferI es (block a r is) = do
+  inferI es (block (a , r) is) = do
     t ← inferC (r ∷ es) is
-    _ ← decToMaybe (t subtypeOfW? (a , r))
+    _ ← decToMaybe (t subtypeOfW? liftW (a , r))
     just (a , exactly r)
 
-  inferI es (loop a r is) = do
+  inferI es (loop (a , r) is) = do
     t ← inferC (a ∷ es) is
-    _ ← decToMaybe (t subtypeOfW? (a , r))
+    _ ← decToMaybe (t subtypeOfW? liftW (a , r))
     just (a , exactly r)
-
 
   inferC es [] = just (0 , exactly 0)
-  
+
   inferC es (i ∷ is) = do
     ti ← inferI es i
     tis ← inferC es is
-    just (comp ti tis)
+    compM ti tis
 
-  example0' = (1 , 1) subtypeOf? (2 , 2)
-  example0 = inferI [] (block 1 1 (br FinM.zero ∷ []))
+  example0' = (1 , 1) subtypeOf-≡? (2 , 2)
+  example0 = inferI [] (block (1 , 1) (br FinM.zero ∷ []))
   example1 = inferI (1 ∷ []) (br FinM.zero)
   example2 = inferC (1 ∷ []) (br FinM.zero ∷ [])
 
@@ -266,56 +364,59 @@ module TypeInference where
   lemma (suc m) zero = cong suc (+-comm 0 m)
   lemma (suc m) (suc n) = cong suc (lemma m n)
 
-  soundnessC : ∀{a r} → (es : Vec ℕ n) → (is : Code n) → inferC es is subtypeOfWM (a , r) → hasTypeC es is (a , r)
-  soundnessI : ∀{a r} → (es : Vec ℕ n) → (i : Insn n) → inferI es i subtypeOfWM (a , r) → hasTypeI es i (a , r)
-  soundnessC es [] (_ , refl , refl , refl) = refl
-  soundnessC es (i ∷ is) proof with inferI es i | inspect (inferI es) i
-  ... | just (a , mr) | [ infer-i≡ ] with inferC es is | inspect (inferC es) is
-  soundnessC es (i ∷ is) ((d , .d) , refl , refl , refl) | just (a , exactly r) | [ infer-i≡ ] | just (a' , exactly r') | [ infer-is≡ ] = let
-    open ≤-Reasoning
-    in (r + (a' ∸ r) + d
-       , soundnessI es i (subst (_subtypeOfWM _) (sym infer-i≡) ( (a' ∸ r + d , a' ∸ r + d) , refl , sym (+-assoc a _ _) , sym (+-assoc r _ _))) 
-       , soundnessC es is (subst (_subtypeOfWM _) (sym infer-is≡) ( (r ∸ a' + d , r ∸ a' + d) , refl , trans (sym (+-assoc a' _ _)) (cong (_+ d) (lemma r a')) ,  trans (sym (+-assoc r' _ _)) (cong (_+ d) (+-comm r' _))))
-       )
-  soundnessC es (i ∷ is) (d' , r∸a+r0'≤r' , (d , refl , refl)) | just (a , exactly r) | [ infer-i≡ ] | just (a' , atleast r0') | [ infer-is≡ ] = let
-    open ≤-Reasoning
-    in {!!}
-  soundnessC es (i ∷ is) (d , q , p) | just (a , atleast r0) | [ infer-i≡ ] | just (a' , exactly r') | [ infer-is≡ ] = {!!}
-  soundnessC es (i ∷ is) (d , q , p) | just (a , atleast r0) | [ infer-i≡ ] | just (a' , atleast r0') | [ infer-is≡ ] = {!!}
--- ( subst (λ X → (a + (a' ∸ r) + d , r + (a' ∸ r) + d) instanceOfWM X) 
+  soundnessC : ∀{a r} → (es : Vec ℕ n) → (is : Code n) → inferC es is subtypeOfWM (just (a , exactly r)) → es ⊢ is hasTypeC (a , r)
+  soundnessI : ∀{a r} → (es : Vec ℕ n) → (i : Insn n) → inferI es i subtypeOfWM (just (a , exactly r)) → es ⊢ i hasTypeI (a , r)
+  soundnessC es [] (_ , refl , refl) = refl
+  soundnessC es (i ∷ is) inferCSub with inferI es i | inspect (inferI es) i
+  ... | just (a'' , mr'') | [ eqI ] with inferC es is | inspect (inferC es) is
+  soundnessC es (i ∷ is) inferCSub | just (aᵢ , exactly rᵢ) | [ eqI ] | just (aᵢ' , exactly rᵢ') | [ eqC ] with aᵢ' ≤? rᵢ | rᵢ ≤? aᵢ'
+  ... | no ¬ar | no ¬ra = ⊥-elim (¬ar (≰⇒≥ ¬ra))
+  soundnessC es (i ∷ is) (d , refl , refl) | just (aᵢ , exactly rᵢ) | [ eqI ] | just (aᵢ' , exactly rᵢ') | [ eqC ] | yes aᵢ'≤rᵢ | _ with m≤n⇒∃d[m+d≡n] aᵢ'≤rᵢ
+  ... | dᵢ , refl = let
+    subI = subst (_subtypeOfWM just (_ , exactly _)) (sym eqI) (d , refl , refl)
+    subC = subst (_subtypeOfWM just (_ , exactly _)) (sym eqC) (dᵢ + d , sym (+-assoc aᵢ' _ _) , trans (sym (+-assoc rᵢ' _ _)) (cong (λ M → rᵢ' + M + d) (sym (m+n∸m≡n aᵢ' dᵢ))))
+    in rᵢ + d , soundnessI es i subI , soundnessC es is subC
+  soundnessC es (i ∷ is) (d , refl , refl) | just (aᵢ , exactly rᵢ) | [ eqI ] | just (aᵢ' , exactly rᵢ') | [ eqC ] | no _ | yes rᵢ≤aᵢ' with m≤n⇒∃d[m+d≡n] rᵢ≤aᵢ'
+  ... | dᵢ , refl = let
+    subI = subst (_subtypeOfWM just (_ , exactly _)) (sym eqI) (dᵢ + d , trans (sym (+-assoc aᵢ _ _)) (cong (λ M → aᵢ + M + d) (sym (m+n∸m≡n rᵢ dᵢ))) , sym (+-assoc rᵢ _ _))
+    subC = subst (_subtypeOfWM just (_ , exactly _)) (sym eqC) (d , refl , refl)
+    in  aᵢ' + d , soundnessI es i subI , soundnessC es is subC
+  soundnessC es (i ∷ is) inferCSub | just (aᵢ , exactly rᵢ) | [ eqI ] | just (aᵢ' , atleast rᵢ') | [ eqC ] with aᵢ' ≤? rᵢ | rᵢ ≤? aᵢ'
+  ... | no ¬ar | no ¬ra = ⊥-elim (¬ar (≰⇒≥ ¬ra))
+  soundnessC es (i ∷ is) (r , r0≤ , d , refl , refl) | just (aᵢ , exactly rᵢ) | [ eqI ] | just (aᵢ' , atleast r0ᵢ') | [ eqC ] | yes aᵢ'≤rᵢ | _ with m≤n⇒∃d[m+d≡n] aᵢ'≤rᵢ | m≤n⇒∃!d[m+d≡n] r0≤
+  ... | dᵢ , refl | rd , refl , _ = let
+    subI = subst (_subtypeOfWM just (_ , exactly _)) (sym eqI) (d , refl , refl)
+    subC = subst (_subtypeOfWM just (_ , exactly _)) (sym eqC) (sub≤-+⇒sub≤ (rd , dᵢ + d , {!!} , {!!}  ))
+    in rᵢ + d , soundnessI es i subI , soundnessC es is subC
+  soundnessC es (i ∷ is) (r , r≤ , d , refl , refl) | just (aᵢ , exactly rᵢ) | [ eqI ] | just (aᵢ' , atleast rᵢ') | [ eqC ] | no _ | yes rᵢ≤aᵢ' = {!!}
+  soundnessC es (i ∷ is) inferCSub | just (a , atleast r) | [ eqI ] | just (a' , exactly r') | [ eqC ] = {!!}
+  soundnessC es (i ∷ is) inferCSub | just (a , atleast r) | [ eqI ] | just (a' , atleast r') | [ eqC ] = {!!}
 
-  soundnessI es (const x) (_ , refl , refl , refl) = refl
-  soundnessI es (load x) (_ , refl , refl , refl) = refl
-  soundnessI es (store x) (_ , refl , refl , refl) = refl
-  soundnessI es add (_ , refl , refl , refl) = refl
-  soundnessI es mul (_ , refl , refl , refl) = refl
-  soundnessI es and (_ , refl , refl , refl) = refl
-  soundnessI es not (_ , refl , refl , refl) = refl
-  soundnessI es nop (_ , refl , refl , refl) = refl
-  soundnessI es (br l) (_ , (d , .d) , refl , refl , refl) = (d , refl)
-  soundnessI es (brif l) (d , refl , refl , refl) = (refl , {!!})
-
-  soundnessI es (block a' r' is) proof with inferC (r' ∷ es) is | inspect (inferC (r' ∷ es)) is
-  ... | just (a'' , mr'') | [ eq ] with (a'' , mr'') subtypeOfW? (a' , r')
-  soundnessI es (block a' r' is) a'r'⊑ar | just (a'' , exactly r'') | [ eq ] | yes a''r''⊑a'r' =
-    (soundnessC (r' ∷ es) is (subst (_subtypeOfWM _) (sym eq) a''r''⊑a'r') , a'r'⊑ar)
-  soundnessI es (block a' r' is) a'r'⊑ar | just (a'' , atleast r0'') | [ eq ] | yes (∃r''≥r0'',a''r''⊑a'r') =
-    (soundnessC (r' ∷ es) is (subst (_subtypeOfWM _) (sym eq) (∃r''≥r0'',a''r''⊑a'r')) , a'r'⊑ar)
-
-  soundnessI es (loop a' r' is) proof with inferC (a' ∷ es) is | inspect (inferC (a' ∷ es)) is
-  ... | just (a'' , mr'') | [ eq ] with (a'' , mr'') subtypeOfW? (a' , r')
-  soundnessI es (loop a' r' is) a'r'⊑ar | just (a'' , exactly r'') | [ eq ] | yes a''r''⊑a'r' =
-    (soundnessC (a' ∷ es) is (subst (_subtypeOfWM _) (sym eq) a''r''⊑a'r') , a'r'⊑ar)
-  soundnessI es (loop a' r' is) a'r'⊑ar | just (a'' , atleast x) | [ eq ] | yes ∃r''≥r0'',a''r''⊑a'r' =
-    (soundnessC (a' ∷ es) is (subst (_subtypeOfWM _) (sym eq) ∃r''≥r0'',a''r''⊑a'r') , a'r'⊑ar)
+  soundnessI es (const z) (_ , refl , refl) = refl
+  soundnessI es (load x) (_ , refl , refl) = refl
+  soundnessI es (store x) (_ , refl , refl) = refl
+  soundnessI es add (_ , refl , refl) = refl
+  soundnessI es mul (_ , refl , refl) = refl
+  soundnessI es and (_ , refl , refl) = refl
+  soundnessI es not (_ , refl , refl) = refl
+  soundnessI es nop (_ , refl , refl) = refl
+  soundnessI es (br l) (_ , _ , d , es!!l+d≡a , _) = d , es!!l+d≡a
+  soundnessI {a = suc a} es (brif l) (d , s[es!!l+d]≡sa , refl) with suc-injective s[es!!l+d]≡sa
+  ... | refl = refl , d , refl
+  soundnessI es (block (a' , r') is) inferISub with inferC (r' ∷ es) is | inspect (inferC  (r' ∷ es)) is
+  ... | just (a'' , mr'') | [ eq ] with (a'' , mr'') subtypeOfW? (a' , exactly r')
+  soundnessI es (block (a' , r') is) sub | just (a , exactly r) | [ eq ] | yes sub' =
+    sub , soundnessC (r' ∷ es) is (subst (_subtypeOfWM liftWM (a' , r')) (sym eq) sub')
+  soundnessI es (block (a' , r') is) sub | just (a , atleast r0) | [ eq ] | yes sub≤' =
+    sub , soundnessC (r' ∷ es) is (subst (_subtypeOfWM liftWM (a' , r')) (sym eq) sub≤')
+  soundnessI es (loop (a' , r') is) inferISub with inferC (a' ∷ es) is | inspect (inferC  (a' ∷ es)) is
+  ... | just (a'' , mr'') | [ eq ] with (a'' , mr'') subtypeOfW? (a' , exactly r')
+  soundnessI es (loop (a' , r') is) sub | just (a , exactly r) | [ eq ] | yes sub' =
+    sub , soundnessC (a' ∷ es) is (subst (_subtypeOfWM liftWM (a' , r')) (sym eq) sub')
+  soundnessI es (loop (a' , r') is) sub | just (a , atleast r0) | [ eq ] | yes sub≤' =
+    sub , soundnessC (a' ∷ es) is (subst (_subtypeOfWM liftWM (a' , r')) (sym eq) sub≤')
 
 {-
-  soundness es (i ∷ is) inferOk with inferI es i | inspect (inferI es) i
-  ... | just (a0 , anything) | [ eq ] = {!!}
-  ... | just (a0 , just r0) | [ eq ] with inferC es is
-  ... | just (a0' , anything) = {!!}
-  ... | just (a0' , just r0') = {!!}
-
   principality : ∀{a r} → (es : Vec ℕ n) → (is : Code n) → hasTypeC es is (a , r) → ∃ λ ((a0 , mr0) : ℕ × Wildcard ℕ) → inferC es is ≡ just (a0 , mr0) × (a0 , mr0) instanceOfW (a , r)
   principality es [] [] with inferC es [] | inspect (inferC es) []
   principality {a} es [] [] | just (.0 , .(just 0)) | [ refl ] = ((0 , just 0) , refl , a , refl , refl)
@@ -366,34 +467,34 @@ module Semantics (_≟_ : Dec-≡ Var)  where
     injN {es = es} {es' = []} = subst Lbls {!!}
     injN {es = e ∷ es} {es' = es'} (inj₁ cfg) = inj₁ cfg
     injN {es = e ∷ es} {es' = es'} (inj₂ outer) = inj₂ {!!}
+{-
+    ⟦_⟧I : (i : Insn n) → {a r : ℕ} → {es : Vec ℕ n} → es ⊢ i hasTypeI (a , r) → Cfg a → Cfg r ⊎ Lbls es
+    ⟦_⟧C : (is : Code n) → {a r : ℕ} → {es : Vec ℕ n} → es ⊢ is hasTypeC (a , r) → Cfg a → Cfg r ⊎ Lbls es
 
-    ⟦_⟧i : (i : Insn n) → {a r : ℕ} → {es : Vec ℕ n} → es ⊢ i hasMinTypeI (a , r) → Cfg a → Cfg r ⊎ Lbls es
-    ⟦_⟧ : (is : Code n) → {a r : ℕ} → {es : Vec ℕ n} → es ⊢ is hasTypeC (a , r) → Cfg a → Cfg r ⊎ Lbls es
-
-    ⟦ .(const z) ⟧i (tconst {z}) (sto , []) =  inj₁ (sto , z ∷ [])
-    ⟦ .(load v) ⟧i (tload {v}) (sto , []) = inj₁ (sto , lookupS v sto ∷ [])
-    ⟦ .(store v) ⟧i (tstore {v}) (sto , z ∷ []) = inj₁ (updateS v z sto , [])
-    ⟦ .nop ⟧i tnop (sto , []) = inj₁ (sto , [])
-    ⟦ .not ⟧i tnot (sto , z ∷ []) = inj₁ (sto , castB' (BoolM.not (castB z)) ∷ [])
-    ⟦ .and ⟧i tand (sto , z ∷ z' ∷ []) = inj₁ (sto , castB' (castB z ∧ castB z') ∷ [])
-    ⟦ .mul ⟧i tmul (sto , z ∷ z' ∷ []) =  inj₁ (sto , z IntM.* z' ∷ []) 
-    ⟦ .add ⟧i tadd (sto , z ∷ z' ∷ []) = inj₁ (sto , z IntM.+ z' ∷ [])
+    ⟦ .(const z) ⟧I (tconst {z}) (sto , []) =  inj₁ (sto , z ∷ [])
+    ⟦ .(load v) ⟧I (tload {v}) (sto , []) = inj₁ (sto , lookupS v sto ∷ [])
+    ⟦ .(store v) ⟧I (tstore {v}) (sto , z ∷ []) = inj₁ (updateS v z sto , [])
+    ⟦ .nop ⟧I tnop (sto , []) = inj₁ (sto , [])
+    ⟦ .not ⟧I tnot (sto , z ∷ []) = inj₁ (sto , castB' (BoolM.not (castB z)) ∷ [])
+    ⟦ .and ⟧I tand (sto , z ∷ z' ∷ []) = inj₁ (sto , castB' (castB z ∧ castB z') ∷ [])
+    ⟦ .mul ⟧I tmul (sto , z ∷ z' ∷ []) =  inj₁ (sto , z IntM.* z' ∷ []) 
+    ⟦ .add ⟧I tadd (sto , z ∷ z' ∷ []) = inj₁ (sto , z IntM.+ z' ∷ [])
     -- stack in cfg contains as much as `br` needs.
-    ⟦ br l ⟧i tbr cfg = inj₂ (injL cfg)
-    ⟦ brif l ⟧i tbrif (sto , z ∷ ostk) =
+    ⟦ br l ⟧I tbr cfg = inj₂ (injL cfg)
+    ⟦ brif l ⟧I tbrif (sto , z ∷ ostk) =
       if castB z
       then inj₁ (sto , ostk)
       else inj₂ (injL (sto , ostk))
-    ⟦ block a r is ⟧i (tblock is-hasTypeC) cfg with ⟦ is ⟧ is-hasTypeC cfg
+    ⟦ block a r is ⟧I (tblock is-hasTypeC) cfg with ⟦ is ⟧ is-hasTypeC cfg
     ... | inj₁ cfg' = inj₁ cfg'
     ... | inj₂ (inj₁ cfg') = inj₁ cfg'
     ... | inj₂ (inj₂ outer) = inj₂ outer
-    ⟦ loop a r is ⟧i (tloop is-hasTypeC) cfg with ⟦ is ⟧ is-hasTypeC cfg
+    ⟦ loop a r is ⟧I (tloop is-hasTypeC) cfg with ⟦ is ⟧ is-hasTypeC cfg
     ... | inj₁ cfg' = inj₁ cfg'
     ... | inj₂ (inj₁ cfg') = ⟦ loop a r is ⟧i (tloop is-hasTypeC) cfg'
     ... | inj₂ (inj₂ outer) = inj₂ outer
 
-    ⟦ .[] ⟧ [] cfg = inj₁ cfg
+    ⟦ .[] ⟧C [] cfg = inj₁ cfg
     -- Sequential composition ⟦ i ∷ is ⟧ provides only minimum footprint for ⟦ i ⟧i, i.e. it provides (VecM.take a0 ostk) for `i` and keeps (VecM.drop a0 ostk) for subsequent instructions `is` 
     -- This can be done because we know the minimum footprint `a0` for `i` by `hasMinTypeI` predicate.
     -- If the evaluation of `i` normally goes in current frame, then we take back `VecM.drop a0 ostk` under `ostk'` which is production of `i`.
@@ -401,7 +502,18 @@ module Semantics (_≟_ : Dec-≡ Var)  where
     -- Sequencial composition only give minimum footprint for `br l` instruction too.
     -- Here, `es !! l` corresponds to the minumum footprint for `br l`.
     -- So `br` instruction itself does not need to do something like spliting local stack or discarding stack elements.
-    ⟦ i ∷ is ⟧ (((a0 , r0) , i-hasMinTypeI , (d , .d) , refl , refl , refl) ∷ tis) (sto , ostk) with ⟦ i ⟧i i-hasMinTypeI (sto , VecM.take a0 ostk)
+    ⟦ i ∷ is ⟧C (((a0 , r0) , i-hasMinTypeI , (d , .d) , refl , refl , refl) ∷ tis) (sto , ostk) with ⟦ i ⟧i i-hasMinTypeI (sto , VecM.take a0 ostk)
     ... | inj₁ (sto' , ostk') = ⟦ is ⟧ tis (sto' , ostk' VecM.++ (VecM.drop a0 ostk))
     ... | inj₂ lbls = inj₂ lbls
 
+-}
+
+  ⟦_⟧vt : Wildcard ℕ → Set
+  ⟦ exactly r ⟧vt = Cfg r
+  ⟦ atleast r0 ⟧vt = ∀ r → r0 ≤ r → Cfg r
+
+  ⟦_⟧ft : Wildcard ℕ × Wildcard ℕ → Set
+  ⟦ a , r ⟧ft = ∀ d → ⟦ up d a ⟧vt → ⟦ up d r ⟧vt where
+    up : ℕ → Wildcard ℕ → Wildcard ℕ
+    up n (exactly r) = exactly (r + n)
+    up n (atleast r0) = atleast (r0 + n)
