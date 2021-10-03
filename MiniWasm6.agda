@@ -117,9 +117,6 @@ module Typing where
   n+o≡p⇒m+n+o≡m+p : ∀ m {n o p} → n + o ≡ p → m + n + o ≡ m + p
   n+o≡p⇒m+n+o≡m+p m n+o≡p = trans (+-assoc m _ _) (cong (m +_) n+o≡p)
 
-  <>⇒⊥ : ∀{m n} → m ≰ n → n ≰ m → ⊥
-  <>⇒⊥ m≰n n≱m = n≱m (≰⇒≥ m≰n)
-
   ≤-diff : ∀{m n} → m ≤ n → m + (n ∸ m) ≡ n
   ≤-diff m≤n = m+[n∸m]≡n m≤n
 
@@ -230,6 +227,10 @@ module Typing where
   postGap (uni (e , _ , r+e≡r')) = e , r+e≡r'
   postGap (bi (_ , e , _ , r+e≡r')) = e , r+e≡r'
 
+  +d+d∈' : {t' : ℕ × ℕ} → (qt : Q × ℕ × ℕ) → (d : ℕ) → let (a' , r') = t' in let (_ , a , r) = qt in a + d ≡ a' → r + d ≡ r' → (a' , r') ∈ qt
+  +d+d∈' (uni , t) d a+d≡a' r+d≡r' = uni (d , a+d≡a' , r+d≡r')
+  +d+d∈' (bi , t) d a+d≡a' r+d≡r' = bi (d , d , a+d≡a' , r+d≡r')
+
   uniExt-isPreorder : IsPreorder _≡_ uniExt
   uniExt-isPreorder = record
     { isEquivalence = isEquivalence
@@ -242,20 +243,22 @@ module Typing where
     ; reflexive = λ {refl → (0 , 0 , +0-id , +0-id )}
     ; trans = λ { (d , e , refl , refl) (d' , e' , refl , refl) → d + d' , e + e' , +-assoc' d d' , +-assoc' e e'}
     }
-    
+ 
   <:-isPreorder : IsPreorder _≡_ _<:_
   <:-isPreorder = record
     { isEquivalence = isEquivalence
     ; reflexive = λ
-      { {uni , _} refl → uni (IsPreorder.reflexive uniExt-isPreorder refl)
-      ; {bi , _} {q , _} refl → bi (IsPreorder.reflexive biExt-isPreorder refl)
+      { {uni , _} refl → uni (uniM.reflexive refl)
+      ; {bi , _} {q , _} refl → bi (biM.reflexive refl)
       }
     ; trans = λ
       { {uni , _} {uni , _} {uni , _} (uni ij) (uni jk) → uni (IsPreorder.trans uniExt-isPreorder ij jk)
       ; {bi , _} {uni , _} {uni , _} (bi ij) (uni jk) → bi (IsPreorder.trans biExt-isPreorder ij (uniExt⇒biExt jk))
       ; {bi , _} {bi , _} {_ , _} (bi ij) (bi jk) → bi (IsPreorder.trans biExt-isPreorder ij jk)
       }
-    }
+    } where
+    module uniM = IsPreorder uniExt-isPreorder
+    module biM = IsPreorder biExt-isPreorder
 
   <:M-isPreorder : IsPreorder _≡_ _<:M_
   <:M-isPreorder = record
@@ -269,7 +272,7 @@ module Typing where
       ; {just _} {just _} {just _} (sub ij) (sub jk) → sub (IsPreorder.trans <:-isPreorder ij jk)
       }
     }
-    
+
   -- _:Cm_ _:Im_ 
   -- Wasm specification style definition 
   -- Every single nstruction (except stack polymorhic e.g. br l) has only minimum type
@@ -286,24 +289,23 @@ module Typing where
     and : es ⊢ and :Im (2 , 1)
     mul : es ⊢ mul :Im (2 , 1)
     add : es ⊢ add :Im (2 , 1)
-    br : (l : Fin n) → (a r : ℕ) → es ⊢ br l :Im (es !! l + a , r)
+    br : (l : Fin n) → (d e : ℕ ) → es ⊢ br l :Im (es !! l + d , e)
     brif : (l : Fin n) → es ⊢ brif l :Im (suc (es !! l) , es !! l)
-    block : {is : Code (suc n)} → (r ∷ es) ⊢ is :Cm (a , r) → es ⊢ block (a , r) is :Im (a , r)
-    loop : {is : Code (suc n)} → (a ∷ es) ⊢ is :Cm (a , r) → es ⊢ loop (a , r) is :Im (a , r)
+    block : {is : Code (suc n)} → (t : ℕ × ℕ) → let (a , r) = t in (r ∷ es) ⊢ is :Cm (a , r) → es ⊢ block (a , r) is :Im (a , r)
+    loop : {is : Code (suc n)} → (t : ℕ × ℕ) → let (a , r) = t in (a ∷ es) ⊢ is :Cm (a , r) → es ⊢ loop (a , r) is :Im (a , r)
 
   data _⊢_:Cm_ es where
     [] : es ⊢ [] :Cm (a , a)
-    cons : ∀{i is a1 r1 a2 r2}
-      → es ⊢ i :Im (a1 , r1)
-      → (a1' d : ℕ)
+    comp : ∀{i is a1 r1 a2 r2 a1+d d}
       → a2 ≡ r1 + d 
-      → a1' ≡ a1 + d
+      → a1+d ≡ a1 + d
+      → es ⊢ i :Im (a1 , r1)
       → es ⊢ is :Cm (a2 , r2)
-      → es ⊢ (i ∷ is) :Cm (a1' , r2)
+      → es ⊢ (i ∷ is) :Cm (a1+d , r2)
 
   -- Direct definition _:Cd_ _:Id_ 
-  -- Every instruction has 
-  -- The compositions are 
+  -- Every instruction is polymorphic
+  -- compositions are degined by direct mediating stack type
   data _⊢_:Cd_ (es : Vec ℕ n) : Code n → ℕ × ℕ → Set
   data _⊢_:Id_ (es : Vec ℕ n) : Insn n → ℕ × ℕ → Set where -- direct typing
     const : (d : ℕ) → es ⊢ const z :Id (d , suc d)
@@ -314,7 +316,7 @@ module Typing where
     and : (d : ℕ) → es ⊢ and :Id (suc (suc d) , suc d)
     mul : (d : ℕ) → es ⊢ mul :Id (suc (suc d) , suc d)
     add : (d : ℕ) → es ⊢ add :Id (suc (suc d) , suc d)
-    br : (l : Fin n) → (d d' : ℕ) → es ⊢ br l :Id (es !! l + d , d')
+    br : (l : Fin n) → (d e : ℕ) → es ⊢ br l :Id (es !! l + d , e)
     brif : (l : Fin n) → (d : ℕ) →  es ⊢ brif l :Id (suc (es !! l) + d , es !! l + d)
     block : {is : Code (suc n)} → (t : ℕ × ℕ) → let (a , r) = t in (r ∷ es) ⊢ is :Cd (a , r) → (d : ℕ) → es ⊢ block (a , r) is :Id (a + d , r + d)
     loop :  {is : Code (suc n)} → (t : ℕ × ℕ) → let (a , r) = t in (a ∷ es) ⊢ is :Cd (a , r) → (d : ℕ) → es ⊢ loop (a , r) is :Id (a + d , r + d)
@@ -361,6 +363,7 @@ module Typing where
       → es ⊢ is :Cs (g2 , a2 , r2)
       → es ⊢ (i ∷ is) :Cs (bi , a1 , r2)
     sub : ∀{is qt qt'} → es ⊢ is :Cs qt → qt <: qt' → es ⊢ is :Cs qt'
+
 
 module TypeInference where
   open Syntax
@@ -411,9 +414,40 @@ module TypeInference where
   example1 = inferI (1 ∷ []) (br FinM.zero)
   example2 = inferC (1 ∷ []) (br FinM.zero ∷ [])
 
+  Cd⇒Cm : {es : Vec ℕ n} → {t : ℕ × ℕ} → {is : Code n} → es ⊢ is :Cd t → es ⊢ is :Cm t
+  Cd⇒Cm ([] _) = []
+  Cd⇒Cm (ti ∷[ refl ] tis) with Cd⇒Cm tis
+  Cd⇒Cm (const _ ∷[ refl ] _) | tis' = comp refl refl const tis'
+  Cd⇒Cm (load _ ∷[ refl ] _) | tis' = comp refl refl load tis'
+  Cd⇒Cm (store _ ∷[ refl ] _) | tis' = comp refl refl store tis'
+  Cd⇒Cm (nop _ ∷[ refl ] _) | tis' = comp refl refl nop tis'
+  Cd⇒Cm (not d ∷[ refl ] _) | tis' = comp refl refl not tis'
+  Cd⇒Cm (and d ∷[ refl ] _) | tis' = comp refl refl and tis'
+  Cd⇒Cm (mul d ∷[ refl ] _) | tis' = comp refl refl mul tis'
+  Cd⇒Cm (add d ∷[ refl ] _) | tis' = comp refl refl add tis'
+  Cd⇒Cm (br l d e ∷[ refl ] _) | tis' = comp {d = 0} +0-id' +0-id' (br l d e) tis'
+  Cd⇒Cm (brif l d ∷[ refl ] _) | tis' = comp refl refl (brif l) tis'
+  Cd⇒Cm (block (a' , r') tis d ∷[ refl ] _) | tis' = comp refl refl (block _ (Cd⇒Cm tis)) tis' 
+  Cd⇒Cm (loop (a' , r') tis d ∷[ refl ] _) | tis' = comp refl refl (loop _ (Cd⇒Cm tis)) tis'
+
+  Cm⇒Cd : {es : Vec ℕ n} → {t : ℕ × ℕ} → {is : Code n} → es ⊢ is :Cm t → es ⊢ is :Cd t
+  Cm⇒Cd [] = [] _
+  Cm⇒Cd (comp refl refl ti tis) with Cm⇒Cd tis
+  Cm⇒Cd (comp refl refl const _) | tis' = const _ ∷[ refl ] tis'
+  Cm⇒Cd (comp refl refl load _) | tis' = load _ ∷[ refl ] tis'
+  Cm⇒Cd (comp refl refl store _) | tis' = store _ ∷[ refl ] tis'
+  Cm⇒Cd (comp refl refl nop _) | tis' = nop _ ∷[ refl ] tis'
+  Cm⇒Cd (comp refl refl not _) | tis' = not _ ∷[ refl ] tis'
+  Cm⇒Cd (comp refl refl and _) | tis' = and _ ∷[ refl ] tis'
+  Cm⇒Cd (comp refl refl mul _) | tis' = mul _ ∷[ refl ] tis'
+  Cm⇒Cd (comp refl refl add _) | tis' = add _ ∷[ refl ] tis'
+  Cm⇒Cd {es = es} {t = .((es !! l) + d + d' , _)} (comp {d = d'} refl refl (br l d e) _) | tis' rewrite +-assoc (es !! l) d d' =
+    br l _ _ ∷[ refl ] tis'
+  Cm⇒Cd (comp refl refl (brif l) _) | tis' = brif l _ ∷[ refl ] tis'
+  Cm⇒Cd (comp refl refl (block (a' , r') tis) _) | tis' = block _ (Cm⇒Cd tis) _ ∷[ refl ] tis'
+  Cm⇒Cd (comp refl refl (loop (a' , r') tis) _) | tis' = loop _ (Cm⇒Cd tis) _ ∷[ refl ] tis'
 
   soundsubC : ∀{qt t} → {es : Vec ℕ n} → {is : Code n} → es ⊢ is :Cs qt → t ∈ qt → es ⊢ is :Cd t
-
   soundsubI : ∀{qt t} → {es : Vec ℕ n} → {i : Insn n} → es ⊢ i :Is qt → t ∈ qt → es ⊢ i :Id t
   soundsubI const (uni (d , refl , refl)) = const d
   soundsubI load (uni (d , refl , refl)) = load d
@@ -427,12 +461,12 @@ module TypeInference where
   soundsubI (brif l) (uni (d , refl , refl)) = brif l d
   soundsubI (block (q , a , r) tis) (uni (d , refl , refl)) = block (a , r) (soundsubC tis (min∈ (q , a , r))) d
   soundsubI (loop (q , a , r) tis) (uni (d , refl , refl)) = loop (a , r) (soundsubC tis (min∈ (q , a , r))) d 
-  soundsubI (sub {qt = uni , a , r} ti (uni (d' , refl , refl))) (uni (d , refl , refl)) =
-    soundsubI ti (subst (_∈ (uni , a , r)) (+-assoc'-pair d' d d' d) (+d+d∈ (d' + d) (uni , a , r)))
-  soundsubI (sub {qt = bi , a , r} ti (bi (d' , e' , refl , refl))) (uni (d , refl , refl)) =
-    soundsubI ti (subst (_∈ (bi , a , r)) (+-assoc'-pair d' d e' d) (+d+e∈ (d' + d) (e' + d) (a , r)))
-  soundsubI (sub {qt = .bi , a , r} ti (bi (d' , e' , refl , refl))) (bi (d , e , refl , refl)) =
-    soundsubI ti (subst (_∈ (bi , a , r)) (+-assoc'-pair d' d e' e) (+d+e∈ (d' + d) (e' + e) (a , r)))
+  soundsubI (sub {qt = uni , a , r} ti (uni (d' , refl , refl))) (uni (d , refl , refl)) rewrite +-assoc a d' d | +-assoc r d' d =
+    soundsubI ti (+d+d∈ (d' + d) (uni , a , r))
+  soundsubI (sub {qt = bi , a , r} ti (bi (d' , e' , refl , refl))) (uni (d , refl , refl)) rewrite +-assoc a d' d | +-assoc r e' d =
+    soundsubI ti (+d+e∈ (d' + d) (e' + d) (a , r))
+  soundsubI (sub {qt = .bi , a , r} ti (bi (d' , e' , refl , refl))) (bi (d , e , refl , refl)) rewrite +-assoc a d' d | +-assoc r e' e =
+    soundsubI ti (+d+e∈ (d' + d) (e' + e) (a , r))
 
   soundsubC [] (uni (d , refl , refl)) = [] d
   soundsubC (comp-uni ti refl tis) (uni (d , refl , refl)) =
@@ -441,12 +475,12 @@ module TypeInference where
     soundsubI ti (bi (d , e , refl , refl)) ∷[ refl ] soundsubC tis (+d+d∈ e (g2 , r1 , r2))
   soundsubC (comp-bir {g1 = g1} {a1 = a1} {r1 = r1} ti refl tis) (bi (d , e , refl , refl)) =
     soundsubI ti (+d+d∈ d (g1 , a1 , r1)) ∷[ refl ] soundsubC tis (bi (d , e , refl , refl))
-  soundsubC (sub {qt = .uni , a , r} .{uni , _} tis (uni (d' , refl , refl))) (uni (d , refl , refl)) =
-    soundsubC tis (subst (_∈ (uni , a , r)) (+-assoc'-pair d' d d' d) (+d+d∈ (d' + d) (uni , a , r)))
-  soundsubC (sub {qt = .bi , a , r} .{uni , _} tis (bi (d' , e' , refl , refl))) (uni (d , refl , refl)) =
-    soundsubC tis (subst (_∈ (bi , a , r)) (+-assoc'-pair d' d e' d) (+d+e∈ (d' + d) (e' + d) (a , r)))
-  soundsubC (sub {qt = .bi , a , r} .{bi , _} tis (bi (d' , e' , refl , refl))) (bi (d , e , refl , refl)) =
-    soundsubC tis (subst (_∈ (bi , a , r)) (+-assoc'-pair d' d e' e) (+d+e∈ (d' + d) (e' + e) (a , r)))
+  soundsubC (sub {qt = .uni , a , r} .{uni , _} tis (uni (d' , refl , refl))) (uni (d , refl , refl)) rewrite +-assoc a d' d | +-assoc r d' d =
+    soundsubC tis (+d+d∈ (d' + d) (uni , a , r))
+  soundsubC (sub {qt = .bi , a , r} .{uni , _} tis (bi (d' , e' , refl , refl))) (uni (d , refl , refl)) rewrite +-assoc a d' d | +-assoc r e' d =
+    soundsubC tis (+d+e∈ (d' + d) (e' + d) (a , r))
+  soundsubC (sub {qt = .bi , a , r} .{bi , _} tis (bi (d' , e' , refl , refl))) (bi (d , e , refl , refl)) rewrite +-assoc a d' d | +-assoc r e' e =
+    soundsubC tis (+d+e∈ (d' + d) (e' + e) (a , r))
 
   subQM-reflexive = IsPreorder.reflexive <:M-isPreorder
 
@@ -506,8 +540,6 @@ module TypeInference where
   ... | just qtis | .qtis , refl , ∈  with qtis <:? (uni , a' , r') | dec-yes (qtis <:? (uni , a' , r')) (∈⇒<:uni ∈)
   ... | yes <: | _ =  (uni , a' , r') , refl , uni (d , refl , refl)
 
-
-
   lemma : ∀ m p {n o k} → n + o ≡ p + k → p ≤ n → m + (n ∸ p) + o ≡ m + k
   lemma m p n+o≡p+k p≤n with m≤n⇒∃d[m+d≡n] p≤n
   ...  | d , refl = trans (cong (λ d → m + d + _) (m+n∸m≡n p d)) (n+o≡p⇒m+n+o≡m+p m (m+n+o≡m+p⇒n+o≡p p n+o≡p+k))
@@ -518,20 +550,16 @@ module TypeInference where
   ... | just (q2 , a2 , r2) | (.q2 , .a2 , .r2) , refl , ∈2 with a2 ≤? r1 | r1 ≤? a2
   ... | no ¬a2≤r1 | no ¬r1≤a2 = ⊥-elim (¬a2≤r1 (≰⇒≥ ¬r1≤a2))
 
-
-  principalityC _ (ti ∷[ refl ] tis) | just (uni , a1 , r1) | ._ , refl , uni (d1 , refl , r1+d1≡a2+d2) | just (uni , a2 , r2) | ._ , refl , uni (d2 , refl , refl) | yes a2≤r1 | _ =
-    (uni , a1 , r2 + (r1 ∸ a2)) , refl , uni (d1 , refl , lemma r2 a2 r1+d1≡a2+d2 a2≤r1)
+  principalityC _ (ti ∷[ refl ] tis) | just (uni , a1 , r1) | ._ , refl , uni (d1 , refl , r1+e1≡a2+d2) | just (uni , a2 , r2) | ._ , refl , uni (d2 , refl , refl) | yes a2≤r1 | _ =
+    (uni , a1 , r2 + (r1 ∸ a2)) , refl , uni (d1 , refl , lemma r2 a2 r1+e1≡a2+d2 a2≤r1)
   principalityC _ (ti ∷[ refl ] tis) | just (bi , a1 , r1) | ._ , refl , bi (d1 , e1 , refl , r1+e1≡a2+d2) | just (uni , a2 , r2) | ._ , refl , uni (d2 , refl , refl) | yes a2≤r1 | _ =
     (bi , a1 , r2 + (r1 ∸ a2)) , refl , bi (d1 , e1 , refl , lemma r2 a2 r1+e1≡a2+d2 a2≤r1)
-
   principalityC _ (ti ∷[ refl ] tis) | just (q1 , a1 , r1) | ._ , refl , ∈1 | just (bi , a2 , r2) | ._ , refl , bi (d2 , e2 , refl , refl) | yes a2≤r1 | _ with preGap ∈1
   ... | (d1 , refl) = (bi ,  a1 , r2) , refl , bi (d1 , e2 , refl , refl) 
-
   principalityC _ (ti ∷[ refl ] tis) | just (uni , a1 , r1) | ._ , refl , uni (d1 , refl , refl) | just (uni , a2 , r2) | ._ , refl , uni (d2 , a2+d2≡r1+d1 , refl) | no _ | yes r1≤a2 =
     (uni , a1 + (a2 ∸ r1) , r2) , refl , uni (d2 , lemma a1 r1 a2+d2≡r1+d1 r1≤a2 , refl)
   principalityC _ (ti ∷[ refl ] tis) | just (uni , a1 , r1) | ._ , refl , uni (d1 , refl , refl) | just (bi , a2 , r2) | ._ , refl , bi (d2 , e2 , a2+d2≡r1+d1 , refl) | no _ | yes r1≤a2 =
     (bi , a1 + (a2 ∸ r1) , r2) , refl , bi (d2 , e2 , lemma a1 r1 a2+d2≡r1+d1 r1≤a2 , refl)
-
   principalityC _ (ti ∷[ refl ] tis) | just (bi , a1 , r1) | ._ , refl , bi (d1 , e1 , refl , refl) | just (q2 , a2 , r2) | ._ , refl , ∈2 | no _ | yes r1≤a2 with postGap ∈2
   ... | (e2 , refl) = (bi , a1 , r2) , refl , bi (d1 , e2 , refl , refl)
 
