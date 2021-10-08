@@ -74,7 +74,6 @@ module Typing where
   m≤n⇒∃!d[m+d≡n] {n = n} z≤n = (n , refl , sym)
   m≤n⇒∃!d[m+d≡n] {n = suc n} (s≤s m≤n) = let (d , m+d≡n , ∀d'[m+d'≡n⇒d'≡d]) = m≤n⇒∃!d[m+d≡n] m≤n in (d , cong suc m+d≡n , λ m+d'≡n → ∀d'[m+d'≡n⇒d'≡d] (suc-injective m+d'≡n)) 
 
-
   m≤n⇒∃d[m+d≡n] : ∀{m n} → m ≤ n → ∃ λ d → m + d ≡ n
   m≤n⇒∃d[m+d≡n] m≤n = ∃!⇒∃ (m≤n⇒∃!d[m+d≡n] m≤n)
 
@@ -85,6 +84,7 @@ module Typing where
   ∃!d[m+d≡n]? m n with m ≤? n
   ... | yes m≤n = yes (m≤n⇒∃!d[m+d≡n] m≤n)
   ... | no m≰n = no λ (d , m+d≡n , _) → m≰n (∃d[m+d≡n]⇒m≤n (d ,  m+d≡n))
+
 
   _-?_ : Decidable λ n m → ∃! _≡_ λ d → m + d ≡ n
   m -? n = ∃!d[m+d≡n]? n m
@@ -150,6 +150,29 @@ module Typing where
   
   _subtypeOf≤_ : ℕ × ℕ → ℕ × ℕ → Set
   (a , r0) subtypeOf≤ (a' , r') = ∃ λ r → r0 ≤ r × (a , r) subtypeOf (a' , r')
+ 
+  data Grow : Set where
+    == : Grow
+    >< : Grow
+
+  _subtypeOfG_ : ℕ × ℕ × Grow → ℕ × ℕ × Grow → Set
+  (a , r , ==) subtypeOfG (a' , r' , ==) = ∃ λ d → a + d ≡ a' × r + d ≡ r'
+  (a , r , ><) subtypeOfG (a' , r' , _) = (∃ λ d → a + d ≡ a') × (∃ λ e → r + e ≡ r')
+  (a , r , ==) subtypeOfG (a' , r' , ><) = ⊥
+
+  sub==-sub==' : (∃ λ d → a + d ≡ a' × r + d ≡ r') → a ≤ a' × r ≤ r' × a' ∸ a ≡ r' ∸ r
+  sub==-sub==' {a = a} {r = r} (d , a+d≡a' , r+d≡r') =
+    ∃d[m+d≡n]⇒m≤n (d , a+d≡a') , ∃d[m+d≡n]⇒m≤n (d , r+d≡r') , trans (m+d≡n⇒m∸n≡d {m = a} a+d≡a') (sym (m+d≡n⇒m∸n≡d {m = r} r+d≡r')) 
+
+  sub=='-sub== : a ≤ a' × r ≤ r' × a' ∸ a ≡ r' ∸ r → ∃ λ d → a + d ≡ a' × r + d ≡ r'
+  sub=='-sub== {a} {a'} {r} {r'} (a≤a' , r≤r' , a'∸a≡r'∸r) = a' ∸ a , m+[n∸m]≡n a≤a' , trans (cong (r +_ ) (a'∸a≡r'∸r)) (m+[n∸m]≡n r≤r')
+
+  sub><-sub><' : (∃ λ d → a + d ≡ a') × (∃ λ e → r + e ≡ r') → a ≤ a' × r ≤ r'
+  sub><-sub><' (∃d[a+d≡a'] , ∃e[r+e≡r']) = ∃d[m+d≡n]⇒m≤n ∃d[a+d≡a'] , ∃d[m+d≡n]⇒m≤n ∃e[r+e≡r']
+
+  sub><'-sub>< : a ≤ a' × r ≤ r' → (∃ λ d → a + d ≡ a') × (∃ λ e → r + e ≡ r')
+  sub><'-sub>< (a≤a' , r≤r') = (m≤n⇒∃d[m+d≡n] a≤a') , (m≤n⇒∃d[m+d≡n] r≤r')
+
 
   _subtypeOf≤?_ : Decidable _subtypeOf≤_
   (a , r0) subtypeOf≤? (a' , r') with a ≤? a' | a' ∸ a ≤? r'
@@ -169,7 +192,7 @@ module Typing where
   _subtypeOfW_ : ℕ × Wildcard ℕ → ℕ × Wildcard ℕ → Set
   (a , exactly r) subtypeOfW (a' , exactly r') = (a , r) subtypeOf (a' , r')
   (a , exactly r) subtypeOfW (a' , atleast r0') = ⊥
-  (a , atleast r0) subtypeOfW (a' , exactly r') = (a , r0) subtypeOf≤ (a' , r')
+  (a , atleast r0) subtypeOfW (a' , exactly r') = (a , r0) subtypeOf≤ (a' , r') -- <- 
   (a , atleast r0) subtypeOfW (a' , atleast r0') = (a , r0) subtypeOf≤ (a' , r0')
 
   _subtypeOfW?_ : Decidable _subtypeOfW_
@@ -180,7 +203,7 @@ module Typing where
 
   _subtypeOfWM_ : Maybe (ℕ × Wildcard ℕ) → Maybe (ℕ × Wildcard ℕ) → Set
   _ subtypeOfWM nothing = ⊤
-  just t subtypeOfWM just t' = t subtypeOfW t'
+  just t subtypeOfWM just t' = t subtypeOfW t' -- <-
   _ subtypeOfWM _ = ⊥
 
   _subtypeOfWM?_ : Decidable _subtypeOfWM_
@@ -289,7 +312,7 @@ module TypeInference where
   ... | _ | yes _ = just (a + (a' ∸ r) , exactly r')
   compM (a , exactly r) (a' , atleast r0') with a' ≤? r | r ≤? a'
   ... | no ¬a'r | no ¬ra'  = ⊥-elim (¬a'r (≰⇒≥ ¬ra'))
-  ... | yes _ | _ = just (a , atleast (r0' + (r ∸ a')))
+  ... | yes _ | _ = just (a , atleast (r0' )) -- <- 
   ... | _ | yes _ = just (a + (a' ∸ r) , atleast r0')
   compM (a , atleast r0) (a' , exactly r') with a' ≤? r0 | r0 ≤? a'
   ... | no ¬a'r | no ¬ra'  = ⊥-elim (¬a'r (≰⇒≥ ¬ra'))
@@ -299,6 +322,8 @@ module TypeInference where
   ... | no ¬a'r | no ¬ra'  = ⊥-elim (¬a'r (≰⇒≥ ¬ra'))
   ... | yes _ | _ = just (a , atleast (r0' + (r0 ∸ a')))
   ... | _ | yes _ = just (a , atleast r0')
+  
+  -- compM (a , atleast r0) (a' , exactly r') =>  max r0 a'  , exactly (max r0 a' - a' + r')
 
   liftW : ℕ × ℕ → ℕ × Wildcard ℕ
   liftW (a , r) = (a , exactly r)
@@ -384,9 +409,9 @@ module TypeInference where
   soundnessC es (i ∷ is) inferCSub | just (aᵢ , exactly rᵢ) | [ eqI ] | just (aᵢ' , atleast rᵢ') | [ eqC ] with aᵢ' ≤? rᵢ | rᵢ ≤? aᵢ'
   ... | no ¬ar | no ¬ra = ⊥-elim (¬ar (≰⇒≥ ¬ra))
   soundnessC es (i ∷ is) (r , r0≤ , d , refl , refl) | just (aᵢ , exactly rᵢ) | [ eqI ] | just (aᵢ' , atleast r0ᵢ') | [ eqC ] | yes aᵢ'≤rᵢ | _ with m≤n⇒∃d[m+d≡n] aᵢ'≤rᵢ | m≤n⇒∃!d[m+d≡n] r0≤
-  ... | dᵢ , refl | rd , refl , _ = let
+  ... | dᵢ , refl | rd , refl , f = let
     subI = subst (_subtypeOfWM just (_ , exactly _)) (sym eqI) (d , refl , refl)
-    subC = subst (_subtypeOfWM just (_ , exactly _)) (sym eqC) (sub≤-+⇒sub≤ (rd , dᵢ + d , {!!} , {!!}  ))
+    subC = subst (_subtypeOfWM just (_ , exactly _)) (sym eqC) ({!!}) --(sub≤-+⇒sub≤ (rd , dᵢ + d , {!!} , {!!}  ))
     in rᵢ + d , soundnessI es i subI , soundnessC es is subC
   soundnessC es (i ∷ is) (r , r≤ , d , refl , refl) | just (aᵢ , exactly rᵢ) | [ eqI ] | just (aᵢ' , atleast rᵢ') | [ eqC ] | no _ | yes rᵢ≤aᵢ' = {!!}
   soundnessC es (i ∷ is) inferCSub | just (a , atleast r) | [ eqI ] | just (a' , exactly r') | [ eqC ] = {!!}
